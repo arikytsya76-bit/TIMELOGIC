@@ -1,0 +1,7 @@
+node_modules/
+.expo/
+dist-android/
+release/
+*.log
+.env*
+!.env.production.example
