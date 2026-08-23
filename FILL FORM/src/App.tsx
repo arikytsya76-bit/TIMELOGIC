@@ -35,7 +35,9 @@ type Organization = {
   name: string;
   departments: { id: string; name: string }[];
 };
-const API = `${window.location.protocol}//${window.location.hostname}:5000/api/register`;
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
+if (!configuredApiUrl) throw new Error('VITE_API_URL is required.');
+const API = `${configuredApiUrl}/register`;
 const zones = [
   "Africa/Lagos",
   "Africa/Accra",
