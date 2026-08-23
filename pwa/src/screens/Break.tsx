@@ -3,10 +3,12 @@ import { ArrowLeft, Play, StopCircle, Loader2, AlertTriangle } from "lucide-reac
 import { BREAK_TYPES, type BreakType } from "../lib/constants";
 import { getActiveBreak, startBreak, endBreak, type BreakRec } from "../services/data";
 import type { ApiError } from "../services/api";
+import { useAuth } from "../context/AuthContext";
 
 const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
 
 export default function Break({ initial, onBack }: { initial: BreakType; onBack: () => void }) {
+  const { user } = useAuth();
   const [selected, setSelected] = useState<BreakType>(initial);
   const [active, setActive] = useState<BreakRec | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -55,7 +57,7 @@ export default function Break({ initial, onBack }: { initial: BreakType; onBack:
     } catch (e) { setError((e as ApiError).message); setBusy(false); }
   }
 
-  const fmtStart = active ? new Date(active.startTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }) : "—";
+  const fmtStart = active ? new Date(active.startTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: user?.organization?.timezone || "Africa/Lagos" }) : "—";
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-md flex-col">

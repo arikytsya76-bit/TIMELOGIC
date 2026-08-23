@@ -70,11 +70,11 @@ export default function HomeScreen() {
     try {
       // 1. Find the active session for this employee's org
       const sessionRes = await api.get<any>('/attendance/current-session');
-      if (!sessionRes?.data) {
+      if (!sessionRes) {
         Alert.alert('No Active Session', 'Your admin has not started an attendance session yet. Please wait.');
         return;
       }
-      const sid = sessionRes.data.sessionId;
+      const sid = sessionRes.sessionId;
 
       // 2. Ask backend for a one-time code (anti-automation challenge)
       const { code } = await requestChallenge(sid);
@@ -90,6 +90,7 @@ export default function HomeScreen() {
       setCheckingIn(false);
     }
   };
+
 
   // ── Check-in step 2: verify the typed code + submit ──────────────────────────
   const submitChallenge = async () => {

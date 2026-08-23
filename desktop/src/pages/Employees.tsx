@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Search, UserPlus, Smartphone, X, Eye, Camera } from 'lucide-react';
+import { Search, UserPlus, Smartphone, X, Eye, Camera, Pencil, Settings2 } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchEmployees, createEmployee, suspendUser, activateUser, deleteEmployee, resetDevice, fetchDepartments, fetchPlanInfo } from '../services';
+import { fetchEmployees, createEmployee, updateEmployee, suspendUser, activateUser, deleteEmployee, resetDevice, fetchDepartments, fetchPlanInfo } from '../services';
 import { API_URL, SOCKET_URL } from '../config';
-import { getToken } from '../services/api';
+import { getToken, authenticatedFetch } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import type { AdminOrganization, EmployeeCheckInMethod } from '../types/api';
 
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30',
@@ -14,20 +16,42 @@ const STATUS_STYLE: Record<string, string> = {
 
 const SHIFTS = ['MORNING', 'AFTERNOON', 'NIGHT', 'FLEXIBLE'];
 
+const METHOD_LABEL: Record<EmployeeCheckInMethod, string> = {
+  PHONE: 'Phone / Device',
+  MANUAL: 'Manual by Admin',
+  BOTH: 'Phone + Manual',
+};
+
+function availableMethods(organization: AdminOrganization | null): EmployeeCheckInMethod[] {
+  if (!organization) return [];
+  const methods: EmployeeCheckInMethod[] = [];
+  if (organization.allowDeviceCheckIn) methods.push('PHONE');
+  if (organization.allowManualCheckIn) methods.push('MANUAL');
+  if (organization.allowDeviceCheckIn && organization.allowManualCheckIn) methods.push('BOTH');
+  return methods;
+}
+
+function defaultMethod(organization: AdminOrganization | null): EmployeeCheckInMethod {
+  return availableMethods(organization)[0] ?? 'PHONE';
+}
+
 interface AddForm {
   firstName: string; lastName: string; email: string; password: string;
   employeeCode: string; shiftType: string; departmentId: string; phone: string;
+  checkInMethod: EmployeeCheckInMethod;
 }
-const defaultForm = (): AddForm => ({ firstName: '', lastName: '', email: '', password: '', employeeCode: '', shiftType: 'MORNING', departmentId: '', phone: '' });
+const defaultForm = (organization: AdminOrganization | null): AddForm => ({ firstName: '', lastName: '', email: '', password: '', employeeCode: '', shiftType: 'MORNING', departmentId: '', phone: '', checkInMethod: defaultMethod(organization) });
 
-function AddEmployeeModal({ depts, onClose, onSaved }: { depts: any[]; onClose: () => void; onSaved: () => void }) {
-  const [form, setForm] = useState<AddForm>(defaultForm());
+function AddEmployeeModal({ depts, organization, onClose, onSaved }: { depts: any[]; organization: AdminOrganization; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState<AddForm>(() => defaultForm(organization));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const up = (k: keyof AddForm, v: string) => setForm((p) => ({ ...p, [k]: v }));
+  const methods = availableMethods(organization);
+  const up = <K extends keyof AddForm,>(k: K, v: AddForm[K]) => setForm((p) => ({ ...p, [k]: v }));
 
   const submit = async () => {
     if (!form.firstName || !form.lastName || !form.email || !form.password) { setError('First name, last name, email and password are required.'); return; }
+    if (!methods.includes(form.checkInMethod)) { setError('Choose a check-in method enabled for this organization.'); return; }
     setLoading(true); setError('');
     try {
       await createEmployee({ ...form, departmentId: form.departmentId || undefined });
@@ -73,11 +97,95 @@ function AddEmployeeModal({ depts, onClose, onSaved }: { depts: any[]; onClose: 
               </select>
             </div>
           </div>
+          <div>
+            <label className={labelCls}>Employee Check-In Method *</label>
+            <select className={inputCls} value={form.checkInMethod} onChange={(e) => up('checkInMethod', e.target.value as EmployeeCheckInMethod)} disabled={methods.length === 0}>
+              {methods.map((method) => <option key={method} value={method}>{METHOD_LABEL[method]}</option>)}
+            </select>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">
+              Only methods enabled by the Super Admin are available. At the Admin station, the employee confirms each manual action with their own password.
+            </p>
+          </div>
         </div>
         <div className="flex justify-end gap-3 px-6 pb-6">
           <button onClick={onClose} className="px-4 py-2 border border-[var(--border)] text-[var(--text-main)] text-sm font-semibold rounded-xl hover:bg-[var(--hover-bg)] transition">Cancel</button>
           <button onClick={submit} disabled={loading} className="px-6 py-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-bold rounded-xl transition disabled:opacity-60">
             {loading ? 'Adding...' : 'Add Employee'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditCheckInMethodModal({
+  employee,
+  organization,
+  onClose,
+  onSaved,
+}: {
+  employee: any;
+  organization: AdminOrganization;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const methods = availableMethods(organization);
+  const current = employee.checkInMethod as EmployeeCheckInMethod | undefined;
+  const [method, setMethod] = useState<EmployeeCheckInMethod>(() => (
+    current && methods.includes(current) ? current : defaultMethod(organization)
+  ));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const save = async () => {
+    if (!methods.includes(method)) {
+      setError('No enabled check-in method is available for this organization.');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      await updateEmployee(employee.id, { checkInMethod: method });
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update the employee.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+      <div className="bg-[var(--card-bg)] border border-[var(--border)] rounded-3xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-5 border-b border-[var(--border)]">
+          <div>
+            <h2 className="text-lg font-bold text-[var(--text-main)]">Edit Check-In Method</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">{employee.firstName} {employee.lastName}</p>
+          </div>
+          <button onClick={onClose} className="text-[var(--text-muted)]"><X size={20} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          {error && <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-400">{error}</div>}
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">Allowed method</label>
+            <select value={method} onChange={(event) => setMethod(event.target.value as EmployeeCheckInMethod)} disabled={methods.length === 0}
+              className="w-full border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-main)] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50">
+              {methods.map((option) => <option key={option} value={option}>{METHOD_LABEL[option]}</option>)}
+            </select>
+          </div>
+          {current && !methods.includes(current) && (
+            <p className="text-xs text-amber-700 dark:text-amber-400">The current {METHOD_LABEL[current]} method is no longer enabled organization-wide. Saving will move this employee to an available method.</p>
+          )}
+          <div className="rounded-xl bg-[var(--hover-bg)] p-3 text-xs text-[var(--text-muted)]">
+            Effective channels are always the intersection of this employee setting and the organization-wide permissions.
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 pb-6">
+          <button onClick={onClose} className="px-4 py-2 border border-[var(--border)] text-[var(--text-main)] rounded-xl text-sm font-semibold">Cancel</button>
+          <button onClick={() => void save()} disabled={loading || methods.length === 0}
+            className="px-5 py-2 bg-primary-700 hover:bg-primary-800 text-white rounded-xl text-sm font-bold disabled:opacity-50">
+            {loading ? 'Saving...' : 'Save Method'}
           </button>
         </div>
       </div>
@@ -105,10 +213,9 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
       const fd = new FormData();
       fd.append('photo', file);  // field name must match upload.single('photo')
 
-      const res = await fetch(`${API_URL}/admin/users/${emp.id}/face`, {
+      const res = await authenticatedFetch(`${API_URL}/admin/users/${emp.id}/face`, {
         method: 'POST',
         // DO NOT set Content-Type manually — browser sets it with multipart boundary
-        headers: { Authorization: `Bearer ${token}` },
         body: fd,
       });
 
@@ -135,6 +242,7 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     { label: 'Employee Code',      value: emp.employeeCode ?? '—' },
     { label: 'Department',         value: emp.department?.name ?? '—' },
     { label: 'Shift Type',         value: emp.shiftType ?? '—' },
+    { label: 'Check-In Method',    value: METHOD_LABEL[(emp.checkInMethod as EmployeeCheckInMethod) ?? 'PHONE'] ?? emp.checkInMethod ?? '—' },
     { label: 'Role',               value: emp.role },
     { label: 'Status',             value: emp.status },
     { label: 'Face Registered',    value: emp.profileImageUrl ? '✓ Yes' : '✗ No (required for check-in)' },
@@ -223,6 +331,7 @@ function Spinner() {
 }
 
 export default function Employees() {
+  const { organization } = useAuth();
   const [employees, setEmployees] = useState<any[]>([]);
   const [depts, setDepts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -230,6 +339,7 @@ export default function Employees() {
   const [shift, setShift] = useState('All');
   const [showAdd, setShowAdd] = useState(false);
   const [viewEmp, setViewEmp] = useState<any>(null);
+  const [editEmp, setEditEmp] = useState<any>(null);
   const [plan, setPlan] = useState<any>(null);
 
   const load = () => {
@@ -262,7 +372,11 @@ export default function Employees() {
           : `${employees.length} total`
         }
         action={
-          plan && plan.limit && plan.activeEmployees >= plan.limit ? (
+          availableMethods(organization).length === 0 ? (
+            <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-sm font-semibold rounded-xl">
+              <Settings2 size={15} />No check-in channel enabled
+            </div>
+          ) : plan && plan.limit && plan.activeEmployees >= plan.limit ? (
             <div className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm font-semibold rounded-xl">
               ⚠ Limit reached — upgrade plan
             </div>
@@ -292,7 +406,7 @@ export default function Employees() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)] bg-[var(--hover-bg)]">
-                  {['Employee','Code','Department','Shift','Face','Status','Actions'].map((h) => (
+                  {['Employee','Code','Department','Shift','Method','Face','Status','Actions'].map((h) => (
                     <th key={h} className="text-left text-xs font-semibold text-[var(--text-muted)] px-4 py-3">{h}</th>
                   ))}
                 </tr>
@@ -321,6 +435,11 @@ export default function Employees() {
                     <td className="px-4 py-3 text-[var(--text-muted)]">{e.department?.name ?? '—'}</td>
                     <td className="px-4 py-3"><span className="text-xs font-medium text-[var(--text-muted)] bg-[var(--hover-bg)] px-2 py-0.5 rounded-full border border-[var(--border)]">{e.shiftType}</span></td>
                     <td className="px-4 py-3">
+                      <span className="text-[11px] font-bold text-primary-700 bg-primary-100 dark:bg-primary-900/30 px-2 py-1 rounded-full whitespace-nowrap">
+                        {METHOD_LABEL[(e.checkInMethod as EmployeeCheckInMethod) ?? 'PHONE'] ?? e.checkInMethod ?? '—'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
                       {e.profileImageUrl
                         ? <span className="text-xs font-semibold text-emerald-600">✓ Registered</span>
                         : <span className="text-xs text-amber-600">⚠ Not set</span>
@@ -336,16 +455,17 @@ export default function Employees() {
                         <button onClick={() => setViewEmp(e)} className="p-1.5 rounded-lg hover:bg-[var(--hover-bg)] text-[var(--text-muted)] transition" title="View profile"><Eye size={14} /></button>
                         {e.status !== 'TERMINATED' && (
                           <>
+                            <button onClick={() => setEditEmp(e)} className="p-1.5 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/20 text-primary-600 transition" title="Edit check-in method"><Pencil size={14} /></button>
                             <button onClick={async () => { e.status === 'ACTIVE' ? await suspendUser(e.id) : await activateUser(e.id); load(); }}
                               className={`text-xs font-semibold px-2 py-1 rounded-lg transition ${e.status === 'ACTIVE' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 hover:bg-amber-100' : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 hover:bg-emerald-100'}`}>
                               {e.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
                             </button>
-                            <button onClick={async () => {
+                            {organization?.allowDeviceCheckIn && ['PHONE', 'BOTH'].includes(e.checkInMethod ?? 'PHONE') && <button onClick={async () => {
                               if (!window.confirm(`Reset device for ${e.firstName} ${e.lastName}?\n\nThis unlinks their current phone. The NEXT device they sign in on becomes their bound device, and the old one will stop working. Use this when an employee gets a new phone.`)) return;
                               try { await resetDevice(e.id); alert('Device unlinked. The employee can now sign in on their new phone.'); } catch (err: any) { alert(err?.message ?? 'Could not reset device.'); }
                             }} className="p-1.5 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/20 text-primary-600 transition" title="Reset device (allow login on a new phone)">
                               <Smartphone size={14} />
-                            </button>
+                            </button>}
                             <button onClick={async () => {
                               if (!window.confirm(`Terminate ${e.firstName} ${e.lastName}?\n\nThey will be marked as SACKED and can no longer log in.\nAll their records (attendance, leaves, breaks) are preserved and visible only to Super Admin.`)) return;
                               await deleteEmployee(e.id);
@@ -368,7 +488,8 @@ export default function Employees() {
           </div>
         )}
       </div>
-      {showAdd && <AddEmployeeModal depts={depts} onClose={() => setShowAdd(false)} onSaved={load} />}
+      {showAdd && organization && <AddEmployeeModal depts={depts} organization={organization} onClose={() => setShowAdd(false)} onSaved={load} />}
+      {editEmp && organization && <EditCheckInMethodModal employee={editEmp} organization={organization} onClose={() => setEditEmp(null)} onSaved={load} />}
       {viewEmp && <EmployeeDetailModal emp={viewEmp} onClose={() => setViewEmp(null)} onRefresh={load} />}
     </div>
   );

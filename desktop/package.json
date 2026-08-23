@@ -6,31 +6,67 @@
   "homepage": "https://timelogic.pages.dev",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "vite build",
+    "dev": "concurrently --kill-others-on-fail \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
     "electron": "electron .",
     "preview": "vite preview",
-    "dist": "vite build && electron-builder",
-    "dist:linux": "vite build && electron-builder --linux deb",
-    "dist:win": "vite build && electron-builder --win nsis",
-    "dist:mac": "vite build && electron-builder --mac dmg"
+    "dist": "npm run dist:win",
+    "dist:linux": "npm run build && electron-builder --linux deb --x64",
+    "dist:linux:windows": "npm run build && electron-builder --linux dir --x64 && node scripts/build-deb.js",
+    "dist:win": "npm run build && electron-builder --win nsis --x64",
+    "dist:win:unsigned": "npm run build && electron-builder --win nsis --x64 -c.win.signAndEditExecutable=false"
   },
   "build": {
     "appId": "com.timelogic.admin",
     "productName": "TimeLogic Admin",
     "directories": { "output": "release" },
-    "files": ["dist/**/*", "electron/**/*", "package.json"],
-    "linux": { "target": ["deb"], "category": "Office", "maintainer": "TimeLogic <support@timelogic.app>" },
-    "win": { "target": ["nsis"] },
-    "mac": { "target": ["dmg"], "category": "public.app-category.business" }
+    "files": ["dist/**/*", "electron/**/*", "package.json", "!**/*.bat"],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "../mobile/assets/icon.png",
+      "artifactName": "TimeLogic-Admin-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "shortcutName": "TimeLogic Admin",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "linux": {
+      "target": [{ "target": "deb", "arch": ["x64"] }],
+      "icon": "../mobile/assets/icon.png",
+      "category": "Office",
+      "synopsis": "TimeLogic attendance administration",
+      "description": "Desktop administration app for the TimeLogic attendance platform.",
+      "executableName": "timelogic-admin",
+      "artifactName": "TimeLogic-Admin-${version}-${arch}.${ext}",
+      "maintainer": "TimeLogic <support@timelogic.app>"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0 | libgtk-3-0t64",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0 | libatspi2.0-0t64",
+        "libuuid1",
+        "libsecret-1-0"
+      ],
+      "recommends": [
+        "libayatana-appindicator3-1 | libappindicator3-1"
+      ]
+    }
   },
   "dependencies": {
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.28.0"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
+    "7zip-bin": "^5.2.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",

@@ -1,30 +1,38 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { api, setToken, getToken } from '../services/api';
-
-interface AdminUser {
-  id: string;
-  employeeCode: string | null;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role: 'ADMIN' | 'SUPER_ADMIN';
-  orgId: string;
-  status: string;
-}
+import type { AdminOrganization, AdminUser } from '../types/api';
 
 interface AuthCtx {
   user: AdminUser | null;
+  organization: AdminOrganization | null;
   loading: boolean;
-  login: (identifier: string, password: string) => Promise<boolean>;
+  login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthCtx>({
   user: null,
+  organization: null,
   loading: true,
-  login: async () => false,
+  login: async () => ({ ok: false, error: 'Authentication is unavailable.' }),
   logout: () => {},
 });
+
+function normalizeUser(raw: AdminUser): AdminUser {
+  const organization = raw.organization;
+  return {
+    ...raw,
+    organization: {
+      id: organization?.id ?? raw.orgId,
+      name: organization?.name ?? 'Organization',
+      allowDeviceCheckIn: organization?.allowDeviceCheckIn ?? true,
+      allowManualCheckIn: organization?.allowManualCheckIn ?? false,
+      hasStudents: organization?.hasStudents ?? false,
+      openingTime: organization?.openingTime ?? null,
+      timezone: organization?.timezone ?? null,
+    },
+  };
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -36,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       api.get<{ success: boolean; data: AdminUser }>('/auth/me')
         .then((res) => {
-          if (res.data) setUser(res.data);
+          if (res.data && ['ADMIN', 'SUPER_ADMIN'].includes(res.data.role)) setUser(normalizeUser(res.data));
           else setToken(null);
         })
         .catch(() => {
@@ -56,15 +64,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('auth:expired', handler);
   }, []);
 
-  // Admin presence: ping on open + every 5 min so the backend can mark the admin
-  // PRESENT/LATE for the day even when the session token persists across days.
+  // Capability changes are controlled by the Super Admin web app. Refresh them
+  // while this Desktop session is open so tabs and employee-method choices stay current.
   useEffect(() => {
-    if (!user) return;
-    const ping = () => { api.post('/admin/attendance/ping', {}).catch(() => {}); };
-    ping();
-    const id = setInterval(ping, 5 * 60 * 1000);
-    return () => clearInterval(id);
-  }, [user]);
+    if (!user?.id) return;
+    let active = true;
+    const refreshUser = async () => {
+      try {
+        const response = await api.get<{ success: boolean; data: AdminUser }>('/auth/me');
+        if (active && response.data && ['ADMIN', 'SUPER_ADMIN'].includes(response.data.role)) {
+          setUser(normalizeUser(response.data));
+        }
+      } catch { /* the shared API client handles expired sessions */ }
+    };
+    const timer = window.setInterval(() => void refreshUser(), 30_000);
+    const onFocus = () => void refreshUser();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user?.id]);
 
   const login = async (identifier: string, password: string) => {
     try {
@@ -78,14 +99,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         data: { accessToken: string; refreshToken: string; user: AdminUser };
       }>('/auth/login', body);
 
+      if (!['ADMIN', 'SUPER_ADMIN'].includes(res.data.user.role)) {
+        setToken(res.data.accessToken);
+        localStorage.setItem('refreshToken', res.data.refreshToken);
+        await api.post('/auth/logout', { refreshToken: res.data.refreshToken }).catch(() => {});
+        setToken(null);
+        localStorage.removeItem('refreshToken');
+        return { ok: false, error: 'Employee accounts must use the Android app or employee PWA.' };
+      }
+
       // Save both tokens
       setToken(res.data.accessToken);                            // persists to localStorage
       localStorage.setItem('refreshToken', res.data.refreshToken);
 
-      setUser(res.data.user);
-      return true;
-    } catch {
-      return false;
+      setUser(normalizeUser(res.data.user));
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to sign in.';
+      return {
+        ok: false,
+        error: message === 'Invalid credentials'
+          ? 'Invalid credentials. Check your email/code and password.'
+          : message,
+      };
     }
   };
 
@@ -100,7 +136,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{
+      user,
+      organization: user?.organization ?? null,
+      loading,
+      login,
+      logout,
+    }}>
       {children}
     </AuthContext.Provider>
   );

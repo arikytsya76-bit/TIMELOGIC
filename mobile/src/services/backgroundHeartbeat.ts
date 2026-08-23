@@ -2,7 +2,7 @@
 // is backgrounded. The OS controls actual cadence (min ~15 min) and may withhold
 // runs to save battery, so this is best-effort, not a replacement for foreground.
 import * as TaskManager from 'expo-task-manager';
-import * as BackgroundFetch from 'expo-background-fetch';
+import * as BackgroundTask from 'expo-background-task';
 import { tokenStore } from './tokenStore';
 import { sendHeartbeat } from './heartbeat';
 
@@ -13,13 +13,11 @@ TaskManager.defineTask(HEARTBEAT_TASK, async () => {
   try {
     // Fresh JS context on wake — restore the token from SecureStore first.
     const token = await tokenStore.loadFromSecureStore();
-    if (!token) return BackgroundFetch.BackgroundFetchResult.NoData;
-    const res = await sendHeartbeat();
-    return res?.tracked
-      ? BackgroundFetch.BackgroundFetchResult.NewData
-      : BackgroundFetch.BackgroundFetchResult.NoData;
+    if (!token) return BackgroundTask.BackgroundTaskResult.Success;
+    await sendHeartbeat();
+    return BackgroundTask.BackgroundTaskResult.Success;
   } catch {
-    return BackgroundFetch.BackgroundFetchResult.Failed;
+    return BackgroundTask.BackgroundTaskResult.Failed;
   }
 });
 
@@ -27,10 +25,8 @@ export async function registerBackgroundHeartbeat() {
   try {
     const already = await TaskManager.isTaskRegisteredAsync(HEARTBEAT_TASK);
     if (already) return;
-    await BackgroundFetch.registerTaskAsync(HEARTBEAT_TASK, {
-      minimumInterval: 15 * 60, // seconds; OS-enforced floor is ~15 min
-      stopOnTerminate: false,
-      startOnBoot: true,
+    await BackgroundTask.registerTaskAsync(HEARTBEAT_TASK, {
+      minimumInterval: 15, // minutes; Android WorkManager controls exact cadence
     });
   } catch { /* unsupported (e.g. Expo Go) — foreground ping still runs */ }
 }
@@ -38,6 +34,6 @@ export async function registerBackgroundHeartbeat() {
 export async function unregisterBackgroundHeartbeat() {
   try {
     const already = await TaskManager.isTaskRegisteredAsync(HEARTBEAT_TASK);
-    if (already) await BackgroundFetch.unregisterTaskAsync(HEARTBEAT_TASK);
+    if (already) await BackgroundTask.unregisterTaskAsync(HEARTBEAT_TASK);
   } catch { /* ignore */ }
 }

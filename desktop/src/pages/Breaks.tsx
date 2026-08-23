@@ -21,7 +21,7 @@ export default function Breaks() {
 
   useEffect(() => { fetchDailyBreaks().then(setBreaks).finally(() => setLoading(false)); }, []);
 
-  const fmt = (t: string | null) => t ? new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—';
+  const fmt = (t: string | null, timezone?: string | null) => t ? new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone || 'Africa/Lagos' }) : '—';
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -53,8 +53,8 @@ export default function Breaks() {
                       </div>
                     </td>
                     <td className="px-4 py-3"><span className={`text-xs font-bold px-2.5 py-1 rounded-full ${BREAK_COLORS[b.breakType] ?? 'bg-slate-100 text-slate-500'}`}>{b.breakType?.replace('_', ' ')}</span></td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{fmt(b.startTime)}</td>
-                    <td className="px-4 py-3 font-medium text-slate-800">{b.endTime ? fmt(b.endTime) : <span className="text-emerald-600 font-semibold text-xs">Active</span>}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{fmt(b.startTime, b.employee?.organization?.timezone)}</td>
+                    <td className="px-4 py-3 font-medium text-slate-800">{b.endTime ? fmt(b.endTime, b.employee?.organization?.timezone) : <span className="text-emerald-600 font-semibold text-xs">Active</span>}</td>
                     <td className="px-4 py-3 font-bold text-slate-700">{b.durationMinutes ?? '—'}m</td>
                     <td className="px-4 py-3">
                       {b.isAutoEnded

@@ -20,8 +20,8 @@ const LEAVE_LABELS: Record<string, string> = {
 };
 
 export async function getLeaveBalances(): Promise<LeaveBalance[]> {
-  const res = await api.get<{ success: boolean; data: any[] }>('/leaves/balance');
-  return (res.data ?? []).map((b: any) => ({
+  const res = await api.get<any[]>('/leaves/balance');
+  return (res ?? []).map((b: any) => ({
     type: b.leaveType,
     label: LEAVE_LABELS[b.leaveType] ?? b.leaveType,
     entitled: b.totalEntitled,

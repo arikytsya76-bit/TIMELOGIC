@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Shield, Wifi, Smartphone, Lock, Clock, Building2, AlertTriangle, EyeOff } from 'lucide-react';
+import { Shield, Wifi, Smartphone, Lock, Clock, Building2, AlertTriangle, EyeOff, UserCheck, GraduationCap } from 'lucide-react';
 import { fetchAdminOrg } from '../services';
+import { useAuth } from '../context/AuthContext';
 
 // Read-only badge for a setting that's locked to Super Admin
 function StateBadge({ on }: { on: boolean }) {
@@ -12,6 +13,8 @@ function StateBadge({ on }: { on: boolean }) {
 }
 
 export default function Settings() {
+  const { organization } = useAuth();
+  const [orgDetails, setOrgDetails] = useState<any>(null);
   const [offices, setOffices]   = useState<any[]>([]);
   const [selected, setSelected] = useState<any>(null);
   const [loading, setLoading]   = useState(true);
@@ -20,6 +23,7 @@ export default function Settings() {
     (async () => {
       try {
         const org = await fetchAdminOrg();
+        setOrgDetails(org);
         const offs = org?.offices ?? [];
         setOffices(offs);
         if (offs.length) setSelected(offs[0]);
@@ -32,6 +36,11 @@ export default function Settings() {
   }
 
   const s = selected?.securitySettings ?? {};
+  const capabilities = {
+    allowDeviceCheckIn: orgDetails?.allowDeviceCheckIn ?? organization?.allowDeviceCheckIn ?? false,
+    allowManualCheckIn: orgDetails?.allowManualCheckIn ?? organization?.allowManualCheckIn ?? false,
+    hasStudents: orgDetails?.hasStudents ?? organization?.hasStudents ?? false,
+  };
   const row = 'flex items-center justify-between py-3 border-b border-[var(--border)] last:border-0';
 
   return (
@@ -48,6 +57,24 @@ export default function Settings() {
           <p className="text-sm text-amber-800 dark:text-amber-300">
             These settings are <b>managed by the Super Admin</b> and are read-only here. Contact your Super Admin to change Wi-Fi, work hours, or security options.
           </p>
+        </div>
+
+        {/* Organization-wide capabilities (managed by Super Admin) */}
+        <div className="bg-[var(--card-bg)] rounded-2xl border border-[var(--border)] p-5">
+          <h3 className="font-bold text-[var(--text-main)] mb-1 flex items-center gap-2"><Shield size={16} className="text-primary-600" />Attendance Channels</h3>
+          <p className="text-xs text-[var(--text-muted)] mb-3">These permissions control which tabs and employee check-in methods are available throughout the desktop app.</p>
+          <div className={row}>
+            <div className="flex items-center gap-3"><Smartphone size={15} className="text-[var(--text-muted)]" /><div><span className="text-sm font-semibold text-[var(--text-main)]">Phone / Device Check-In</span><p className="text-xs text-[var(--text-muted)]">Employees may use an approved device when their own method permits it.</p></div></div>
+            <StateBadge on={capabilities.allowDeviceCheckIn} />
+          </div>
+          <div className={row}>
+            <div className="flex items-center gap-3"><UserCheck size={15} className="text-[var(--text-muted)]" /><div><span className="text-sm font-semibold text-[var(--text-main)]">Manual Employee Check-In</span><p className="text-xs text-[var(--text-muted)]">Shows the password-protected Manual Check-In station.</p></div></div>
+            <StateBadge on={capabilities.allowManualCheckIn} />
+          </div>
+          <div className={row}>
+            <div className="flex items-center gap-3"><GraduationCap size={15} className="text-[var(--text-muted)]" /><div><span className="text-sm font-semibold text-[var(--text-main)]">Students</span><p className="text-xs text-[var(--text-muted)]">Shows organization-scoped student records and attendance.</p></div></div>
+            <StateBadge on={capabilities.hasStudents} />
+          </div>
         </div>
 
         {offices.length === 0 ? (

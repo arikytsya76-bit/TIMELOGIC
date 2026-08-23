@@ -3,23 +3,30 @@ import { getDeviceId } from "./device";
 import { PLATFORM } from "../config";
 import { LEAVE_COLORS, LEAVE_LABELS } from "../lib/constants";
 
-export interface SessionInfo { sessionId: string; sessionName: string; office?: string; status: string }
+export interface SessionInfo {
+  sessionId: string; sessionName: string; office?: string; status: string;
+  timezone?: string; openTime?: string; closeTime?: string; lateAfterMinutes?: number;
+  startTime?: string; endTime?: string; elapsedMinutes?: number; remainingMinutes?: number | null;
+}
 export interface BreakRec { id: string; breakType: string; startTime: string; endTime: string | null; durationMinutes: number | null }
 export interface StatusRec {
   id: string; sessionId: string; clockInTime: string | null; clockOutTime: string | null;
   status: string; totalWorkHours: string | null; totalBreakMinutes?: number; breakRecords?: BreakRec[];
+  session?: { office?: { timezone?: string | null } | null } | null;
 }
 export interface HistRec {
   id: string; date: string; status: string; clockInTime: string | null; clockOutTime: string | null;
   totalWorkHours: string | null; totalBreakMinutes?: number; wifiVerified?: boolean; deviceVerified?: boolean;
+  timezone?: string | null;
+  session?: { office?: { timezone?: string | null } | null } | null;
 }
 export interface LeaveBalance { type: string; label: string; entitled: number; used: number; pending: number; remaining: number; color: string }
 
 const dev = () => ({ platform: PLATFORM, deviceId: getDeviceId() });
 
 export const getCurrentSession = () => api.get<SessionInfo>("/attendance/current-session");
-export const getStatus = () => api.get<StatusRec | null>("/attendance/status");
-export const getHistory = () => api.get<HistRec[]>("/attendance/history");
+export const getStatus = () => api.get<StatusRec | null>(`/attendance/status?_live=${Date.now()}`);
+export const getHistory = () => api.get<HistRec[]>(`/attendance/history?_live=${Date.now()}`);
 
 export const requestChallenge = (sessionId: string) =>
   api.post<{ code: string; expiresIn: number }>("/attendance/check-in/challenge", { sessionId, ...dev() });

@@ -3,24 +3,14 @@
     "name": "TimeLogic",
     "slug": "attendance-mobile",
     "version": "1.0.0",
+    "platforms": [
+      "android"
+    ],
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
-    "ios": {
-      "supportsTablet": false,
-      "bundleIdentifier": "com.attendance.mobile",
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "TimeLogic needs your location to verify you are on the office WiFi network for check-in.",
-        "NSLocationAlwaysUsageDescription": "TimeLogic needs your location to verify your office WiFi during attendance check-in.",
-        "UIBackgroundModes": [
-          "fetch"
-        ]
-      },
-      "entitlements": {
-        "com.apple.developer.networking.wifi-info": true
-      }
-    },
     "android": {
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -30,27 +20,28 @@
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_WIFI_STATE",
-        "android.permission.CHANGE_WIFI_STATE",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.ACCESS_WIFI_STATE"
       ]
     },
     "plugins": [
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Attendance to access your camera for check-in verification."
+          "cameraPermission": "Allow TimeLogic to access your camera for check-in verification.",
+          "recordAudioAndroid": false
         }
       ],
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Allow Attendance to access your camera for selfie verification."
+          "cameraPermission": "Allow TimeLogic to access your camera for selfie verification.",
+          "microphonePermission": false
         }
       ],
       "expo-asset",
       "expo-font",
       "expo-secure-store",
+      "expo-system-ui",
       [
         "expo-splash-screen",
         {
@@ -58,6 +49,14 @@
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#1D4ED8"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
         }
       ]
     ],

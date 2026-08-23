@@ -4,16 +4,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useColors } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { Shadow } from '../../constants/theme';
 import { getHistoryApi, AttendanceRecord } from '../../services/attendanceService';
 import AttendanceCard from '../../components/AttendanceCard';
 
 const FILTERS = ['All', 'Present', 'Late', 'Absent', 'Leave'];
 
-function formatRecord(r: AttendanceRecord) {
+function formatRecord(r: AttendanceRecord, timezone = 'Africa/Lagos') {
   const date = new Date(r.date);
   const dayLabel = date.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-  const fmt = (t: string | null) => t ? new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : null;
+  const fmt = (t: string | null) => t ? new Date(t).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone }) : null;
   const bMin = r.totalBreakMinutes ?? 0;
   return {
     id: r.id, date: r.date, dayLabel,
@@ -27,6 +28,7 @@ function formatRecord(r: AttendanceRecord) {
 
 export default function HistoryScreen() {
   const C = useColors();
+  const { user } = useAuth();
   const styles = useMemo(() => makeStyles(C), [C]);
 
   const [filter, setFilter] = useState('All');
@@ -39,7 +41,7 @@ export default function HistoryScreen() {
     try {
       setLoading(true); setError(null);
       const data = await getHistoryApi();
-      setRecords(data.map(formatRecord));
+      setRecords(data.map((record) => formatRecord(record, user?.organization?.timezone || 'Africa/Lagos')));
     } catch (err: any) { setError(err?.message ?? 'Failed to load history.'); }
     finally { setLoading(false); }
   }, []);

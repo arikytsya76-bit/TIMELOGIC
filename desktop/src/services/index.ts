@@ -1,5 +1,11 @@
 import { api } from './api';
 import { API_URL } from '../config';
+import type {
+  ApiEnvelope,
+  EmployeeCheckInMethod,
+  ManualAttendanceDashboard,
+  ManualAttendanceResult,
+} from '../types/api';
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export const fetchLiveStats   = () => api.get<any>('/reports/live-stats').then((r) => r.data ?? r);
@@ -15,15 +21,70 @@ export const lockSession      = (id: string) => api.post<any>(`/sessions/${id}/l
 export const refreshQR        = (id: string) => api.post<any>(`/sessions/${id}/refresh-qr`, {}).then((r) => r.data);
 
 // ─── Attendance ──────────────────────────────────────────────────────────────
-export const fetchAttendance  = (query = '') => api.get<any>(`/attendance/history${query}`).then((r) => r.data ?? []);
+export const fetchAttendance = async (query = '') => {
+  const params = new URLSearchParams(query.startsWith('?') ? query.slice(1) : query);
+  params.set('page', '1');
+  params.set('limit', '200');
+  params.set('_live', String(Date.now()));
+  const first = await api.get<any>(`/attendance/history?${params.toString()}`);
+  const rows = Array.isArray(first.data) ? first.data : Array.isArray(first.records) ? first.records : [];
+  const totalPages = Math.max(1, Number(first.totalPages) || 1);
+  if (totalPages === 1) return rows;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) => {
+      const next = new URLSearchParams(params);
+      next.set('page', String(index + 2));
+      return api.get<any>(`/attendance/history?${next.toString()}`).then((r) => Array.isArray(r.data) ? r.data : Array.isArray(r.records) ? r.records : []);
+    }),
+  );
+  return [...rows, ...rest.flat()];
+};
+export const fetchLiveAttendance = () =>
+  api.get<any>(`/attendance/live?_live=${Date.now()}`).then((response) =>
+    Array.isArray(response.data) ? response.data : Array.isArray(response.records) ? response.records : []
+  );
 export const fetchFlagged     = () => api.get<any>('/attendance/flagged').then((r) => r.data ?? []);
 export const flagRecord       = (id: string, reason: string) => api.put<any>(`/attendance/records/${id}/flag`, { reason });
 export const approveRecord    = (id: string) => api.put<any>(`/attendance/records/${id}/approve`, {});
+export const fetchManualAttendance = (params: { sessionId?: string; search?: string } = {}) => {
+  const query = new URLSearchParams({ page: '1', limit: '200' });
+  if (params.sessionId) query.set('sessionId', params.sessionId);
+  if (params.search?.trim()) query.set('search', params.search.trim());
+  return api.get<ApiEnvelope<ManualAttendanceDashboard>>(`/admin/manual-attendance?${query.toString()}`).then(async (first) => {
+    const dashboard = first.data;
+    if ((dashboard.totalPages ?? 1) <= 1) return dashboard;
+    const rest = await Promise.all(
+      Array.from({ length: dashboard.totalPages - 1 }, (_, index) => {
+        const next = new URLSearchParams(query);
+        next.set('page', String(index + 2));
+        return api.get<ApiEnvelope<ManualAttendanceDashboard>>(`/admin/manual-attendance?${next.toString()}`).then((r) => r.data.employees);
+      }),
+    );
+    return { ...dashboard, employees: [...dashboard.employees, ...rest.flat()] };
+  });
+};
+export const manualEmployeeCheckIn = (body: { employeeId: string; sessionId: string; password: string }) =>
+  api.post<ApiEnvelope<ManualAttendanceResult>>('/admin/manual-attendance/check-in', body).then((r) => r.data);
+export const manualEmployeeCheckOut = (body: { employeeId: string; sessionId?: string; password: string }) =>
+  api.post<ApiEnvelope<ManualAttendanceResult>>('/admin/manual-attendance/check-out', body).then((r) => r.data);
 
 // ─── Employees ───────────────────────────────────────────────────────────────
-export const fetchEmployees   = () => api.get<any>('/admin/users').then((r) => r.data ?? []);
+export const fetchEmployees = async () => {
+  const first = await api.get<any>('/admin/users?role=EMPLOYEE&page=1&limit=100');
+  const rows = Array.isArray(first.data) ? first.data : [];
+  const totalPages = Math.max(1, Number(first.totalPages) || 1);
+  if (totalPages === 1) return rows;
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, index) =>
+      api.get<any>(`/admin/users?role=EMPLOYEE&page=${index + 2}&limit=100`).then((r) => Array.isArray(r.data) ? r.data : []),
+    ),
+  );
+  return [...rows, ...rest.flat()];
+};
 export const fetchPlanInfo    = () => api.get<any>('/admin/plan').then((r) => r.data);
 export const createEmployee   = (body: any) => api.post<any>('/admin/employees', body).then((r) => r.data);
+export const updateEmployee   = (id: string, body: { checkInMethod: EmployeeCheckInMethod }) =>
+  api.put<any>(`/admin/users/${id}`, body).then((r) => r.data);
 export const suspendUser      = (id: string) => api.put<any>(`/admin/users/${id}/suspend`, {});
 export const activateUser     = (id: string) => api.put<any>(`/admin/users/${id}`, { status: 'ACTIVE' });
 export const deleteEmployee   = (id: string) => api.delete<any>(`/admin/users/${id}`);
@@ -33,7 +94,7 @@ export const fetchDepartments = () => api.get<any>('/admin/org').then((r) => (r.
 // ─── Leaves ──────────────────────────────────────────────────────────────────
 export const fetchPendingLeaves = () => api.get<any>('/leaves/pending').then((r) => r.data ?? []);
 export const approveLeave       = (id: string) => api.put<any>(`/leaves/${id}/approve`, {});
-export const rejectLeave        = (id: string, reason: string) => api.put<any>(`/leaves/${id}/reject`, { rejectionReason: reason });
+export const rejectLeave        = (id: string, reason: string) => api.put<any>(`/leaves/${id}/reject`, { reason });
 
 // ─── Breaks ──────────────────────────────────────────────────────────────────
 export const fetchDailyBreaks  = () => api.get<any>('/breaks/daily').then((r) => r.data ?? []);
@@ -41,7 +102,7 @@ export const fetchDailyBreaks  = () => api.get<any>('/breaks/daily').then((r) =>
 // ─── Fraud Alerts ────────────────────────────────────────────────────────────
 export const fetchAlerts      = () => api.get<any>('/fraud').then((r) => r.data ?? []);
 export const resolveAlert     = (id: string, resolution: string) => api.put<any>(`/fraud/${id}/resolve`, { resolution });
-export const dismissAlert     = (id: string) => api.put<any>(`/fraud/${id}/dismiss`, {});
+export const dismissAlert     = (id: string) => api.put<any>(`/fraud/${id}/dismiss`, { reason: 'Dismissed by organization admin' });
 export const escalateAlert    = (id: string) => api.put<any>(`/fraud/${id}/escalate`, {});
 
 // ─── Reports ─────────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 /**
  * Central content + configuration for the TimeLogic marketing site.
  * Edit copy, links, and stats here. Download URLs are the only values you
- * must update for go-live (host the desktop installers and paste their URLs).
+ * must update for go-live (host and verify each installer, then paste its URL).
  */
 
 export const NAV = [
@@ -21,26 +21,26 @@ export interface DownloadItem {
   available: boolean;
 }
 
-// Android is the live EAS build. Host the desktop .exe/.deb and replace the
-// two placeholder URLs below (e.g. on Cloudflare R2, GitHub Releases, S3).
+// Build and verify a fresh Android APK before enabling its link. Host each
+// installer (e.g. on Cloudflare R2, GitHub Releases, S3) and update its URL.
 export const DOWNLOADS: Record<DownloadKey, DownloadItem> = {
   android: {
     key: "android",
     label: "Android",
-    href: "https://expo.dev/artifacts/eas/fNLP6bF4yXMh5sskgeUMHX.apk",
-    available: true,
+    href: null,
+    available: false,
   },
   windows: {
     key: "windows",
     label: "Windows",
-    href: "https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-Setup-1.0.0.exe",
-    available: true,
+    href: null,
+    available: false,
   },
   linux: {
     key: "linux",
     label: "Linux",
-    href: "https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-1.0.0.deb",
-    available: true,
+    href: null,
+    available: false,
   },
   ios: { key: "ios", label: "iOS", href: null, available: false },
   mac: { key: "mac", label: "macOS", href: null, available: false },
@@ -55,7 +55,7 @@ export const CONTACT = {
 export const FEATURES = [
   {
     title: "Wi-Fi verified check-in",
-    body: "Attendance only counts on the company network. Off the Wi-Fi, off mobile data, no check-in. Enforced on Android and iPhone, with no null bypass.",
+    body: "Attendance only counts on the company network. Off the Wi-Fi, off mobile data, no check-in. Enforced on Android, with no null bypass.",
     icon: "wifi",
     layer: 1,
   },

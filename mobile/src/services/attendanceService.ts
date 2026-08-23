@@ -29,17 +29,17 @@ export interface AttendanceRecord {
 }
 
 export async function getTodayStatus(): Promise<AttendanceStatus> {
-  const res = await api.get<{ success: boolean; data: any }>('/attendance/status');
-  const d = res.data;
+  const d = await api.get<any>(`/attendance/status?_live=${Date.now()}`);
+    const timezone = d?.session?.office?.timezone || 'Africa/Lagos';
   return {
     hasCheckedIn: !!d?.clockInTime,
     hasCheckedOut: !!d?.clockOutTime,
     status: d?.status ?? null,
     checkInTime: d?.clockInTime
-      ? new Date(d.clockInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+      ? new Date(d.clockInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone })
       : null,
     checkOutTime: d?.clockOutTime
-      ? new Date(d.clockOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+      ? new Date(d.clockOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone })
       : null,
     totalWorkHours: d?.totalWorkHours ?? null,
     onBreak: false,
@@ -54,10 +54,9 @@ export async function getTodayStatus(): Promise<AttendanceStatus> {
 // telling them to connect to the company network (no code is shown).
 export async function requestChallenge(sessionId: string): Promise<{ code: string; expiresIn: number }> {
   const ctx = await collectCheckInContext();
-  const res = await api.post<{ success: boolean; data: { code: string; expiresIn: number } }>(
+  return api.post<{ code: string; expiresIn: number }>(
     '/attendance/check-in/challenge', { sessionId, ...ctx }
   );
-  return res.data;
 }
 
 // Step 2 — submit check-in with the code the user entered + device/wifi context
@@ -67,21 +66,22 @@ export async function checkInApi(payload: {
 }): Promise<AttendanceStatus> {
   // Collect device + wifi context for backend enforcement
   const ctx = await collectCheckInContext();
-  const res = await api.post<{ success: boolean; data: any }>('/attendance/check-in', { ...payload, ...ctx });
-  const d = res.data?.record;
+  const res = await api.post<any>('/attendance/check-in', { ...payload, ...ctx });
+  const d = res?.record;
+  const timezone = res?.timezone || d?.session?.office?.timezone || 'Africa/Lagos';
   return {
     hasCheckedIn: true,
     hasCheckedOut: false,
     status: d?.status ?? 'PRESENT',
     checkInTime: d?.clockInTime
-      ? new Date(d.clockInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-      : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      ? new Date(d.clockInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone })
+      : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone }),
     checkOutTime: null,
     totalWorkHours: null,
     onBreak: false,
     breakType: null,
     breakStartTime: null,
-    penalty: res.data?.penalty ?? d?.penalty ?? 0,
+    penalty: res?.penalty ?? d?.penalty ?? 0,
     record: d,
   };
 }
@@ -89,20 +89,20 @@ export async function checkInApi(payload: {
 export async function checkOutApi(): Promise<{ checkOutTime: string; totalWorkHours: string | null }> {
   // Same device / wifi / location enforcement applies on check-out
   const ctx = await collectCheckInContext();
-  const res = await api.post<{ success: boolean; data: any }>('/attendance/check-out', ctx);
-  const d = res.data;
+  const d = await api.post<any>('/attendance/check-out', ctx);
+  const timezone = d?.session?.office?.timezone || 'Africa/Lagos';
   return {
     checkOutTime: d?.clockOutTime
-      ? new Date(d.clockOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
-      : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+      ? new Date(d.clockOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone })
+      : new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: timezone }),
     totalWorkHours: d?.totalWorkHours ?? null,
   };
 }
 
 export async function getHistoryApi(page = 1, limit = 50): Promise<AttendanceRecord[]> {
-  const res = await api.get<any>(`/attendance/history?page=${page}&limit=${limit}`);
+  const res = await api.get<any>(`/attendance/history?page=${page}&limit=${limit}&_live=${Date.now()}`);
   // Backend returns { data: [...] } — fallback to res.records for safety
-  const rows: any[] = Array.isArray(res.data) ? res.data : Array.isArray((res as any).records) ? (res as any).records : [];
+  const rows: any[] = Array.isArray(res) ? res : Array.isArray((res as any).records) ? (res as any).records : [];
   return rows.map((r: any) => ({
     id: r.id,
     date: r.date,

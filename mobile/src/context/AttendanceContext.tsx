@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { getTodayStatus, checkOutApi, AttendanceStatus } from '../services/attendanceService';
 import { startBreakApi, endBreakApi, getActiveBreakApi } from '../services/breakService';
 
@@ -61,7 +61,7 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
         onBreak: !!activeBreak,
         breakType:      activeBreak?.breakType ?? null,
         breakStartTime: activeBreak?.startTime
-          ? new Date(activeBreak.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })
+          ? new Date(activeBreak.startTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: status.record?.session?.office?.timezone || 'Africa/Lagos' })
           : null,
       });
       if (activeBreak) {
@@ -78,6 +78,11 @@ export function AttendanceProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => { void refreshStatus(); }, 5000);
+    return () => clearInterval(timer);
+  }, [refreshStatus]);
 
   const setCheckedIn = useCallback((time: string, status: string) => {
     setAttendance((p) => ({

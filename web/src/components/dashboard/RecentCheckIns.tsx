@@ -26,7 +26,11 @@ export default function RecentCheckIns() {
     }).finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <div className="bg-[var(--card-bg)] rounded-2xl border border-[var(--border)] p-5">

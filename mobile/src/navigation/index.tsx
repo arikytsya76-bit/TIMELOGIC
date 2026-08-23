@@ -11,6 +11,7 @@ import HistoryScreen    from '../screens/main/HistoryScreen';
 import ProfileScreen    from '../screens/main/ProfileScreen';
 import BreakScreen      from '../screens/breaks/BreakScreen';
 import LeaveRequestScreen from '../screens/leaves/LeaveRequestScreen';
+import SplashScreen from '../screens/SplashScreen';
 
 const RootStack = createStackNavigator();
 const Tab       = createBottomTabNavigator();
@@ -61,7 +62,8 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <SplashScreen />;
   return (
     <RootStack.Navigator screenOptions={{ headerShown: false }}>
       {isAuthenticated

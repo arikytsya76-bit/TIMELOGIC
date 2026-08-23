@@ -5,7 +5,7 @@
 //  • Hashed static assets → stale-while-revalidate (fast, self-updating).
 //  • API calls           → never touched (attendance must always be live).
 
-const CACHE = "timelogic-shell-v3";
+const CACHE = "timelogic-shell-v5-local-lan";
 const SHELL = ["/", "/index.html", "/manifest.webmanifest", "/icon-192.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {

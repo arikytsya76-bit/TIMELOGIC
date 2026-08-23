@@ -15,11 +15,11 @@ export interface HeartbeatResult {
 export async function sendHeartbeat(): Promise<HeartbeatResult | null> {
   try {
     const wifiSSID = await getWifiSSID();
-    const res = await api.post<{ success: boolean; data: HeartbeatResult }>(
+    const res = await api.post<HeartbeatResult>(
       '/attendance/heartbeat',
       { wifiSSID },
     );
-    return res.data;
+    return res;
   } catch {
     return null;
   }

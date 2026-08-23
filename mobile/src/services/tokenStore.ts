@@ -17,6 +17,10 @@ export const tokenStore = {
     SecureStore.setItemAsync(K_ACCESS, access).catch(() => {});
     SecureStore.setItemAsync(K_REFRESH, refresh).catch(() => {});
   },
+  setAccess: (access: string) => {
+    _access = access;
+    SecureStore.setItemAsync(K_ACCESS, access).catch(() => {});
+  },
   clear: () => {
     _access = null; _refresh = null;
     SecureStore.deleteItemAsync(K_ACCESS).catch(() => {});

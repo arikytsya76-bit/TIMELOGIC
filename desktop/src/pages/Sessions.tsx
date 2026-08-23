@@ -15,6 +15,20 @@ function Spinner() {
   return <div className="flex items-center justify-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-2 border-primary-600 border-t-transparent" /></div>;
 }
 
+function formatOfficeTime(value: string | null | undefined, timezone?: string | null) {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '—';
+  try {
+    return parsed.toLocaleTimeString('en-US', {
+      hour: '2-digit', minute: '2-digit', hour12: true,
+      timeZone: timezone || 'Africa/Lagos',
+    });
+  } catch {
+    return parsed.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  }
+}
+
 function CountdownTimer({ endTime }: { endTime: string | null }) {
   const [remaining, setRemaining] = useState('');
   useEffect(() => {
@@ -71,7 +85,7 @@ export default function Sessions() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <Header title="Sessions" subtitle="Sessions auto-start and run for the set duration · QR refreshes every 2 minutes"
+      <Header title="Sessions" subtitle="Sessions follow each office opening, late-after, and closing rules"
         action={
           <button onClick={() => setShowCreate(true)}
             className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2 rounded-xl transition">
@@ -134,7 +148,9 @@ export default function Sessions() {
                       <span className="flex items-center gap-1"><Clock size={11} />QR every {s.qrRefreshInterval}s</span>
                       <span className="flex items-center gap-1"><Users size={11} />{s._count?.attendanceRecords ?? 0} checked in</span>
                       {s.status === 'ACTIVE' && s.endTime && <CountdownTimer endTime={s.endTime} />}
-                      {s.endTime && <span>Ends {new Date(s.endTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</span>}
+                      {s.endTime && <span>Ends {formatOfficeTime(s.endTime, s.office?.timezone || 'Africa/Lagos')}</span>}
+                      {s.office?.openTime && <span>Check-in from {s.office.openTime} until {s.office.lateAfterMinutes ?? 40}m after opening</span>}
+                      {s.office?.closeTime && <span>Checkout after {s.office.closeTime}</span>}
                     </div>
                   </div>
                   <div className="flex gap-2 flex-wrap justify-end">

@@ -4,17 +4,17 @@ A production-ready, single-page marketing site for TimeLogic, the secure workfor
 attendance platform. Built to sit alongside Stripe / Linear / Rippling class SaaS.
 
 ## Stack
-- **Next.js 15** (App Router, React 19, TypeScript)
+- **Next.js 16** (App Router, React 19, TypeScript)
 - **Tailwind CSS v4** (CSS-first `@theme` tokens)
 - **Motion** (`motion/react`) for all animation
 - **Geist** font (self-hosted) + **lucide-react** icons
 
 ## Run
 ```bash
-npm install
+npm ci
 npm run dev      # http://localhost:3000
 npm run build    # production build
-npm start        # serve the production build
+npm start        # serve the static export in out/
 ```
 
 ## Design strategy
@@ -50,13 +50,16 @@ lib/
   motion.ts      # shared variants, easing, spring, in-view config
 ```
 
-## Go-live checklist (2 edits)
-Open `lib/site.ts` and set the desktop download URLs (host the installers from
-`../desktop/release/` on R2 / S3 / GitHub Releases):
-- `DOWNLOADS.windows.href` -> hosted `TimeLogic Admin Setup 1.0.0.exe`
-- `DOWNLOADS.linux.href`   -> hosted `attendance-desktop_1.0.0_amd64.deb`
+## Go-live checklist (3 edits)
+Open `lib/site.ts` and set the download URLs after hosting and verifying the
+installers (for example, on R2 / S3 / GitHub Releases):
+- `DOWNLOADS.android.href` -> freshly built and verified Android APK
+- `DOWNLOADS.windows.href` -> hosted `TimeLogic-Admin-Setup-1.0.0.exe`
+- `DOWNLOADS.linux.href`   -> hosted `TimeLogic-Admin-1.0.0-amd64.deb`
 
-The Android link is already live (EAS artifact). iOS and macOS render as "Coming soon".
+Set each corresponding `available` value to `true` only after verification.
+Previous Android and desktop artifacts predate the current clean builds and are
+intentionally disabled. iOS and macOS remain "Coming soon".
 
 ## Deploy
 Static-friendly: deploy on Cloudflare Pages / Vercel. Build command `npm run build`,

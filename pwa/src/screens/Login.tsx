@@ -1,19 +1,18 @@
 import { useState } from "react";
-import { Mail, Lock, Eye, EyeOff, LogIn, Loader2, Info } from "lucide-react";
+import { Mail, Lock, LogIn, Loader2, Info } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
   const { login } = useAuth();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
-  const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!identifier.trim() || !password) {
-      setError("Enter your email or employee code and password.");
+      setError("Enter your email address and password.");
       return;
     }
     setError("");
@@ -66,14 +65,11 @@ export default function Login() {
             <Lock size={19} className="text-gray400" />
             <input
               className={input}
-              type={show ? "text" : "password"}
+              type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter your password"
             />
-            <button type="button" onClick={() => setShow((s) => !s)} className="text-gray400" aria-label="Toggle password">
-              {show ? <EyeOff size={19} /> : <Eye size={19} />}
-            </button>
           </div>
 
           {error && <p className="mt-3 text-[13px] font-medium text-danger">{error}</p>}

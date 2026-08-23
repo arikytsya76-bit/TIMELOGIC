@@ -1,7 +1,7 @@
 name: Build Desktop Installers
 
-# Builds the TimeLogic Admin desktop app for Windows, macOS and Linux on real
-# runners (where Wine / macOS / FUSE exist). Trigger it from the Actions tab
+# Builds the TimeLogic Admin desktop app for Windows and Linux on native
+# runners. Trigger it from the Actions tab
 # ("Run workflow"), then download the installers from the run's Artifacts.
 on:
   workflow_dispatch:
@@ -14,29 +14,35 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact: linux
+            script: dist:linux
           - os: windows-latest
             artifact: windows
-          - os: macos-latest
-            artifact: macos
+            script: dist:win
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
 
       - name: Install dependencies
         working-directory: desktop
-        run: npm install
+        run: npm ci
 
       - name: Build installer
         working-directory: desktop
         env:
-          # Live backend API (public URL, safe to bake in)
-          VITE_API_URL: https://backend-production-eb91.up.railway.app/api
+          # Local-first build; the packaged app talks to a backend on this PC.
+          VITE_API_URL: http://localhost:5000/api
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist
+        run: npm run ${{ matrix.script }}
+
+      - name: Validate Linux package dependencies
+        if: matrix.artifact == 'linux'
+        run: |
+          dpkg-deb --info desktop/release/*.deb
+          sudo apt-get install --simulate ./desktop/release/*.deb
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
@@ -44,8 +50,5 @@ jobs:
           name: timelogic-admin-${{ matrix.artifact }}
           path: |
             desktop/release/*.exe
-            desktop/release/*.dmg
-            desktop/release/*.AppImage
-            desktop/release/*.zip
             desktop/release/*.deb
-          if-no-files-found: ignore
+          if-no-files-found: error

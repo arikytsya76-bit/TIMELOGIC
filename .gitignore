@@ -5,6 +5,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+!**/.env.local.example
 !**/.env.production.example
 
 # Build output
@@ -15,6 +16,7 @@ desktop/dist-electron/
 
 # Expo / React Native
 mobile/.expo/
+mobile/dist-android/
 
 # Uploaded user data (face photos) — never commit
 backend/uploads/
@@ -23,6 +25,10 @@ backend/uploads/
 **/*.log
 npm-debug.log*
 yarn-error.log*
+**/*.tsbuildinfo
+backend/.tmp-timecheck.js
+backend/src/controllers/Ok now employees that are checked in can.md
+mobile/.expo-export-check/
 
 # Editor / agent tooling
 .claude/

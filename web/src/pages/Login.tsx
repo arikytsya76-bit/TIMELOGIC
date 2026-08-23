@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, Users, Building2, Shield, BarChart3, CheckCircle } from 'lucide-react';
+import { Users, Building2, Shield, BarChart3, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 /* ── Mini dashboard mockup shown on the right panel ───────────────────── */
@@ -89,17 +89,16 @@ export default function Login() {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(false);
-  const [show, setShow]         = useState(false);
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(''); setLoading(true);
-    const ok = await login(email, password);
+    const result = await login(email, password);
     setLoading(false);
-    if (ok) navigate('/dashboard');
-    else setError('Invalid email or password. Please try again.');
+    if (result.ok) navigate('/dashboard');
+    else setError(result.error ?? 'Unable to sign in.');
   };
 
   const inputCls =
@@ -152,7 +151,7 @@ export default function Login() {
                 </label>
                 <div className="relative">
                   <input
-                    type={show ? 'text' : 'password'}
+                    type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter your password"
@@ -160,13 +159,6 @@ export default function Login() {
                     required
                     autoComplete="current-password"
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShow(!show)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-                  >
-                    {show ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
                 </div>
               </div>
 

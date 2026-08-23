@@ -16,13 +16,12 @@ export default function LoginScreen() {
   const styles = useMemo(() => makeStyles(C), [C]);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ identifier?: string; password?: string }>({});
 
   const validate = () => {
     const e: typeof errors = {};
-    if (!identifier.trim()) e.identifier = 'Email or Employee Code is required';
+    if (!identifier.trim()) e.identifier = 'Email address is required';
     if (!password) e.password = 'Password is required';
     else if (password.length < 6) e.password = 'Password must be at least 6 characters';
     setErrors(e);
@@ -87,13 +86,10 @@ export default function LoginScreen() {
                   placeholderTextColor={C.gray300}
                   value={password}
                   onChangeText={(t) => { setPassword(t); setErrors((p) => ({ ...p, password: undefined })); }}
-                  secureTextEntry={!showPassword}
+                  secureTextEntry
                   returnKeyType="done"
                   onSubmitEditing={handleLogin}
                 />
-                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
-                  <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={20} color={C.gray400} />
-                </TouchableOpacity>
               </View>
               {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
             </View>
@@ -147,7 +143,6 @@ function makeStyles(C: ReturnType<typeof useColors>) {
     inputError: { borderColor: C.danger },
     inputIcon: { marginRight: 8 },
     input: { flex: 1, fontSize: 15, color: C.text },
-    eyeBtn: { padding: 4 },
     errorText: { fontSize: 12, color: C.danger, marginTop: 4 },
     loginBtn: { backgroundColor: C.primary, borderRadius: Radius.md, height: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 8, ...Shadow.lg },
     loginBtnDisabled: { opacity: 0.7 },

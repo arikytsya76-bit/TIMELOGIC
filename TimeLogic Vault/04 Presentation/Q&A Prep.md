@@ -29,7 +29,7 @@ No. **Soft deletes only**, full audit trail, permanent sessions, Excel/CSV expor
 Multi-tenant: one backend, every query **scoped by `orgId`**, each org with its own hours/departments/Wi-Fi. 1,000+ orgs supported. → [[Architecture]]
 
 **Q: What's the tech?**
-Node + Express + Prisma + PostgreSQL backend; React/TypeScript/Tailwind web & PWA; Expo Android; Electron desktop; Next.js marketing. Railway + Cloudflare hosting. → [[Tech Stack]]
+Node + Express + Prisma + PostgreSQL backend; React/TypeScript/Tailwind web & PWA; Expo Android; Electron desktop; Next.js marketing. Backend is local-first; public hosting comes after verification. → [[Tech Stack]]
 
 **Q: Why should I trust the numbers vs a fingerprint clock?**
 A fingerprint proves a finger touched a box — not where you are or that it's the right time. We prove **presence + identity + time** on every check-in.

@@ -1,11 +1,13 @@
 {
   "name": "attendance-mobile",
   "version": "1.0.0",
+  "private": true,
   "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
-    "ios": "expo start --ios"
+    "typecheck": "tsc --noEmit",
+    "build:android": "expo export --platform android --output-dir dist-android"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -13,9 +15,10 @@
     "@react-navigation/bottom-tabs": "6.6.1",
     "@react-navigation/native": "6.1.18",
     "@react-navigation/stack": "6.4.1",
-    "expo": "54.0.35",
+    "expo": "~54.0.37",
     "expo-asset": "~12.0.13",
-    "expo-background-fetch": "~14.0.9",
+    "expo-background-task": "~1.0.10",
+    "expo-build-properties": "~1.0.10",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.23",
@@ -23,11 +26,11 @@
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-location": "~19.0.8",
-    "expo-modules-core": "~3.0.30",
     "expo-screen-capture": "~8.0.9",
     "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
+    "expo-system-ui": "~6.0.9",
     "expo-task-manager": "~14.0.9",
     "react": "19.1.0",
     "react-native": "0.81.5",
@@ -41,6 +44,18 @@
     "@babel/core": "^7.26.0",
     "@expo/ngrok": "^4.1.3",
     "@types/react": "~19.1.10",
+    "babel-preset-expo": "~54.0.12",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "@expo/metro-config": {
+      "postcss": "8.5.26"
+    },
+    "xcode": {
+      "uuid": "11.1.1"
+    }
+  },
+  "engines": {
+    "node": ">=20.19.4"
   }
 }

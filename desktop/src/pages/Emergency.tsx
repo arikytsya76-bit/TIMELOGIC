@@ -57,6 +57,7 @@ export default function Emergency() {
   const [busy, setBusy] = useState(false);
   const [liveStats, setLiveStats] = useState<any>(null);
   const [revertBusy, setRevertBusy] = useState<string | null>(null);
+  const visibleActions = ACTIONS.filter((action) => action.key !== 'lock' || user?.role === 'SUPER_ADMIN');
 
   // Refresh live stats every 5 seconds
   useEffect(() => {
@@ -152,7 +153,7 @@ export default function Emergency() {
 
         {/* Action buttons */}
         <div className="grid grid-cols-3 gap-4">
-          {ACTIONS.map((a) => (
+          {visibleActions.map((a) => (
             <div key={a.key} className="bg-[var(--card-bg)] rounded-2xl border border-[var(--border)] shadow-sm p-5 transition-colors">
               <div className="flex items-start gap-3 mb-4">
                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${a.iconBg}`}>

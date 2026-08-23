@@ -122,8 +122,10 @@ export default function FraudAlerts() {
     try {
       if (action === 'escalate') {
         await api.put<any>(`/fraud/${alertId}/escalate`, {});
+      } else if (action === 'dismiss') {
+        await api.put<any>(`/fraud/${alertId}/dismiss`, { reason: 'Dismissed by super admin' });
       } else {
-        await api.put<any>(`/fraud/${alertId}/${action}`, { resolution: action === 'resolve' ? 'Reviewed by super admin' : 'Dismissed by super admin' });
+        await api.put<any>(`/fraud/${alertId}/resolve`, { resolution: 'Reviewed by super admin' });
       }
       setSelected(null); load();
     } catch {}

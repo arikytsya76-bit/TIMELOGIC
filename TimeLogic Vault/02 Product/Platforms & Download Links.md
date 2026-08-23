@@ -15,7 +15,7 @@ tags: [product, platforms, links]
 | 🖥️ **Desktop admin** | Admins | Electron (Win/Linux) | [Windows .exe](https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-Setup-1.0.0.exe) · [Linux .deb](https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-1.0.0.deb) |
 | 🛡️ **Super-Admin** | Platform owner | React + Vite | https://timelogic.pages.dev |
 | 🌐 **Marketing site** | Public | Next 15 + Tailwind v4 + Motion | https://timelogic-web.pages.dev |
-| ☁️ **Backend API** | All apps | Node + Express + Prisma | https://backend-production-eb91.up.railway.app |
+| ☁️ **Backend API** | All apps | Node + Express + Prisma | http://localhost:5000 |
 
 > [!info] Super-Admin demo login
 > `superadmin@acme.com` / `Admin@1234` — **change this before any public demo.**

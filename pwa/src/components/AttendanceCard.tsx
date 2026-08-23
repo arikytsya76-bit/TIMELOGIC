@@ -2,11 +2,12 @@ import { LogIn, LogOut, ArrowRight, Wifi, Smartphone } from "lucide-react";
 import StatusBadge from "./StatusBadge";
 import type { HistRec } from "../services/data";
 
-const fmt = (t: string | null) =>
-  t ? new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }) : "—";
+const fmt = (t: string | null, timezone?: string | null) =>
+  t ? new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: timezone || "Africa/Lagos" }) : "—";
 
 export default function AttendanceCard({ r }: { r: HistRec }) {
   const date = new Date(r.date);
+  const timezone = r.timezone || r.session?.office?.timezone || "Africa/Lagos";
   const dayLabel = date.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
   const bMin = r.totalBreakMinutes ?? 0;
   const totalBreak = bMin > 0 ? `${Math.floor(bMin / 60)}h ${bMin % 60}m` : "—";
@@ -30,12 +31,12 @@ export default function AttendanceCard({ r }: { r: HistRec }) {
             <div className="mb-1 flex items-center gap-2">
               <span className="flex items-center gap-1">
                 <LogIn size={14} className="text-success" />
-                <span className="text-[13px] font-bold text-gray800">{fmt(r.clockInTime)}</span>
+                <span className="text-[13px] font-bold text-gray800">{fmt(r.clockInTime, timezone)}</span>
               </span>
               <ArrowRight size={12} className="text-gray300" />
               <span className="flex items-center gap-1">
                 <LogOut size={14} className="text-orange" />
-                <span className="text-[13px] font-bold text-gray800">{fmt(r.clockOutTime)}</span>
+                <span className="text-[13px] font-bold text-gray800">{fmt(r.clockOutTime, timezone)}</span>
               </span>
             </div>
             <div className="flex items-center gap-1 text-[11px] text-gray500">

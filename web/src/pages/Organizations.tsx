@@ -17,6 +17,8 @@ const ORG_COLORS = ['#15803d','#0891b2','#7c3aed','#b45309','#be185d','#0369a1']
 
 interface OrgFormData {
   name: string; industry: string; subscriptionTier: string;
+  allowDeviceCheckIn: boolean; allowManualCheckIn: boolean; hasStudents: boolean;
+  openingTime: string; timezone: string;
   offices: {
     name: string; address: string; timezone: string; wifiSSID: string; publicIp: string;
     openTime: string; closeTime: string; breakMinutes: number;
@@ -24,7 +26,7 @@ interface OrgFormData {
     breakStart: string; breakEnd: string;
   }[];
   departments: { name: string; breakStart: string; breakEnd: string }[];
-  admin: { firstName: string; lastName: string; email: string; password: string; confirmPassword: string; employeeCode: string };
+  admin: { firstName: string; lastName: string; email: string; password: string; confirmPassword: string };
 }
 const newOffice = () => ({
   name: '', address: '', timezone: 'Africa/Lagos', wifiSSID: '', publicIp: '',
@@ -34,10 +36,34 @@ const newOffice = () => ({
 });
 const defaultForm = (): OrgFormData => ({
   name: '', industry: 'Technology', subscriptionTier: 'starter',
+  allowDeviceCheckIn: true, allowManualCheckIn: false, hasStudents: false,
+  openingTime: '08:00', timezone: 'Africa/Lagos',
   offices: [{ ...newOffice(), name: 'Main Office' }],
   departments: [{ name: 'Engineering', breakStart: '13:00', breakEnd: '14:00' }],
-  admin: { firstName: '', lastName: '', email: '', password: '', confirmPassword: '', employeeCode: '' },
+  admin: { firstName: '', lastName: '', email: '', password: '', confirmPassword: '' },
 });
+
+function CapabilityToggle({ checked, onChange, label, description }: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  description: string;
+}) {
+  return (
+    <label className="flex items-start gap-3 cursor-pointer">
+      <input
+        type="checkbox"
+        className="mt-0.5 h-4 w-4 rounded border-[var(--input-border)] accent-primary-700"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span>
+        <span className="block text-sm font-semibold text-[var(--text-main)]">{label}</span>
+        <span className="block text-[11px] leading-4 text-[var(--text-muted)] mt-0.5">{description}</span>
+      </span>
+    </label>
+  );
+}
 
 function OrgModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [step, setStep] = useState(1);
@@ -50,10 +76,36 @@ function OrgModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
   const inp = 'w-full border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-main)] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-400 placeholder-[var(--text-muted)]';
   const lbl = 'block text-xs font-semibold text-[var(--text-muted)] mb-1.5';
   const submit = async () => {
-    if (form.admin.password !== form.admin.confirmPassword) { setError('Passwords do not match'); return; }
+    const firstName = form.admin.firstName.trim();
+    const lastName = form.admin.lastName.trim();
+    const email = form.admin.email.trim();
+    if (!form.name.trim()) { setError('Organization name is required.'); return; }
+    if (!form.openingTime || !form.timezone) { setError('Company opening time and timezone are required.'); return; }
+    if (!form.allowDeviceCheckIn && !form.allowManualCheckIn) { setError('Enable device check-in, manual check-in, or both.'); return; }
+    if (!firstName || !lastName) { setError('Admin first name and last name are required.'); return; }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Enter a valid admin email address.'); return; }
+    if (form.admin.password.length < 8) { setError('Admin password must be at least 8 characters.'); return; }
+    if (form.admin.password !== form.admin.confirmPassword) { setError('Admin passwords do not match.'); return; }
     setLoading(true); setError('');
     try {
-      await createOrg({ name: form.name, industry: form.industry, subscriptionTier: form.subscriptionTier, offices: form.offices, departments: form.departments, admin: { firstName: form.admin.firstName, lastName: form.admin.lastName, email: form.admin.email, password: form.admin.password, employeeCode: form.admin.employeeCode || undefined } });
+      await createOrg({
+        name: form.name.trim(),
+        industry: form.industry,
+        subscriptionTier: form.subscriptionTier,
+        allowDeviceCheckIn: form.allowDeviceCheckIn,
+        allowManualCheckIn: form.allowManualCheckIn,
+        hasStudents: form.hasStudents,
+        openingTime: form.openingTime,
+        timezone: form.timezone,
+        offices: form.offices,
+        departments: form.departments,
+        admin: {
+          firstName,
+          lastName,
+          email,
+          password: form.admin.password,
+        },
+      });
       onSaved(); onClose();
     } catch (err: any) { setError(err?.message ?? 'Failed to create'); }
     finally { setLoading(false); }
@@ -79,6 +131,40 @@ function OrgModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
             <div><label className={lbl}>Organization Name *</label><input className={inp} value={form.name} onChange={(e) => setForm((p) => ({...p, name: e.target.value}))} placeholder="e.g. Acme Corp" /></div>
             <div><label className={lbl}>Industry</label><select className={inp} value={form.industry} onChange={(e) => setForm((p) => ({...p, industry: e.target.value}))}>{INDUSTRIES.map((i) => <option key={i}>{i}</option>)}</select></div>
             <div><label className={lbl}>Plan</label><select className={inp} value={form.subscriptionTier} onChange={(e) => setForm((p) => ({...p, subscriptionTier: e.target.value}))}>{PLANS.map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase()+p.slice(1)}</option>)}</select></div>
+            <div className="p-4 bg-[var(--hover-bg)] rounded-xl border border-[var(--border)] space-y-3">
+              <div>
+                <p className="text-sm font-bold text-[var(--text-main)]">Company attendance schedule</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Used to evaluate the company admin's first login of the day. Office hours continue to control employee attendance sessions.</p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div><label className={lbl}>Company Opening Time *</label><input className={inp} type="time" value={form.openingTime} onChange={(e) => setForm((p) => ({...p, openingTime: e.target.value}))}/></div>
+                <div><label className={lbl}>Company Timezone *</label><select className={inp} value={form.timezone} onChange={(e) => setForm((p) => ({...p, timezone: e.target.value}))}>{TIMEZONES.map((t) => <option key={t}>{t}</option>)}</select></div>
+              </div>
+            </div>
+            <div className="p-4 bg-[var(--hover-bg)] rounded-xl border border-[var(--border)] space-y-3">
+              <div>
+                <p className="text-sm font-bold text-[var(--text-main)]">Organization capabilities</p>
+                <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Choose which attendance options this organization can assign to its people.</p>
+              </div>
+              <CapabilityToggle
+                checked={form.allowDeviceCheckIn}
+                onChange={(checked) => setForm((p) => ({ ...p, allowDeviceCheckIn: checked }))}
+                label="Device / phone employee check-in"
+                description="Employees assigned the device method can check in from the Android app or web app."
+              />
+              <CapabilityToggle
+                checked={form.allowManualCheckIn}
+                onChange={(checked) => setForm((p) => ({ ...p, allowManualCheckIn: checked }))}
+                label="Manual employee check-in"
+                description="Admins can record attendance manually for employees assigned the manual method."
+              />
+              <CapabilityToggle
+                checked={form.hasStudents}
+                onChange={(checked) => setForm((p) => ({ ...p, hasStudents: checked }))}
+                label="Student support"
+                description="Enable student records and student-focused attendance features for this organization."
+              />
+            </div>
           </div>}
           {step === 2 && <div>
             <div className="flex items-center justify-between mb-4"><h3 className="font-bold text-[var(--text-main)]">Offices, Work Hours & Penalties</h3><button onClick={() => setForm((p) => ({...p, offices: [...p.offices, newOffice()]}))} className="text-xs font-semibold text-primary-600 flex items-center gap-1"><Plus size={12}/>Add</button></div>
@@ -138,7 +224,6 @@ function OrgModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
             <div className="p-3 bg-primary-50 border border-primary-100 rounded-xl text-sm text-primary-700"><strong>Important:</strong> These credentials are for the Admin Desktop Panel.</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className={lbl}>First Name *</label><input className={inp} value={form.admin.firstName} onChange={(e) => updateAdmin('firstName',e.target.value)} placeholder="First name"/></div><div><label className={lbl}>Last Name *</label><input className={inp} value={form.admin.lastName} onChange={(e) => updateAdmin('lastName',e.target.value)} placeholder="Last name"/></div></div>
             <div><label className={lbl}>Email *</label><input className={inp} type="email" value={form.admin.email} onChange={(e) => updateAdmin('email',e.target.value)} placeholder="admin@company.com"/></div>
-            <div><label className={lbl}>Admin Code</label><input className={inp} value={form.admin.employeeCode} onChange={(e) => updateAdmin('employeeCode',e.target.value)} placeholder="ADM001"/></div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4"><div><label className={lbl}>Password *</label><input className={inp} type="password" value={form.admin.password} onChange={(e) => updateAdmin('password',e.target.value)} placeholder="Min 8 chars"/></div><div><label className={lbl}>Confirm *</label><input className={inp} type="password" value={form.admin.confirmPassword} onChange={(e) => updateAdmin('confirmPassword',e.target.value)} placeholder="Repeat"/></div></div>
           </div>}
         </div>
@@ -185,6 +270,11 @@ function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () => void
   const [name, setName]       = useState(org.name ?? '');
   const [industry, setIndustry] = useState(org.industry ?? 'Technology');
   const [tier, setTier]       = useState(org.subscriptionTier ?? 'starter');
+  const [allowDeviceCheckIn, setAllowDeviceCheckIn] = useState(org.allowDeviceCheckIn ?? true);
+  const [allowManualCheckIn, setAllowManualCheckIn] = useState(org.allowManualCheckIn ?? false);
+  const [hasStudents, setHasStudents] = useState(org.hasStudents ?? false);
+  const [openingTime, setOpeningTime] = useState(org.openingTime ?? '08:00');
+  const [timezone, setTimezone] = useState(org.timezone ?? 'Africa/Lagos');
   const [offices, setOffices] = useState<any[]>(() => (org.offices ?? []).map((o: any) => ({
     id: o.id, name: o.name ?? '', address: o.address ?? '', timezone: o.timezone ?? 'Africa/Lagos',
     wifiSSID: o.wifiSSID ?? '', publicIp: o.publicIp ?? '', openTime: o.openTime ?? '08:00', closeTime: o.closeTime ?? '17:00',
@@ -200,9 +290,22 @@ function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () => void
   const updOffice = (i: number, k: string, v: any) => setOffices((p) => { const a = [...p]; a[i] = { ...a[i], [k]: v }; return a; });
 
   const save = async () => {
+    if (!name.trim()) { setError('Organization name is required.'); return; }
+    if (!openingTime || !timezone) { setError('Company opening time and timezone are required.'); return; }
+    if (!allowDeviceCheckIn && !allowManualCheckIn) { setError('Enable device check-in, manual check-in, or both.'); return; }
     setLoading(true); setError('');
     try {
-      await updateOrg(org.id, { name, industry, subscriptionTier: tier, offices });
+      await updateOrg(org.id, {
+        name: name.trim(),
+        industry,
+        subscriptionTier: tier,
+        allowDeviceCheckIn,
+        allowManualCheckIn,
+        hasStudents,
+        openingTime,
+        timezone,
+        offices,
+      });
       onSaved(); onClose();
     } catch (err: any) { setError(err?.message ?? 'Failed to save'); }
     finally { setLoading(false); }
@@ -222,6 +325,42 @@ function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () => void
             <div><label className={lbl}>Plan</label><select className={inp} value={tier} onChange={(e) => setTier(e.target.value)}>{PLANS.map((p) => <option key={p} value={p}>{p[0].toUpperCase()+p.slice(1)}</option>)}</select></div>
           </div>
           <div><label className={lbl}>Industry</label><select className={inp} value={industry} onChange={(e) => setIndustry(e.target.value)}>{INDUSTRIES.map((i) => <option key={i}>{i}</option>)}</select></div>
+
+          <div className="p-4 bg-[var(--hover-bg)] rounded-xl border border-[var(--border)] space-y-3">
+            <div>
+              <p className="text-sm font-bold text-[var(--text-main)]">Company attendance schedule</p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Used to evaluate the company admin's first login of the day. Office hours below continue to control employee attendance sessions.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div><label className={lbl}>Company Opening Time *</label><input className={inp} type="time" value={openingTime} onChange={(e) => setOpeningTime(e.target.value)}/></div>
+              <div><label className={lbl}>Company Timezone *</label><select className={inp} value={timezone} onChange={(e) => setTimezone(e.target.value)}>{TIMEZONES.map((t) => <option key={t}>{t}</option>)}</select></div>
+            </div>
+          </div>
+
+          <div className="p-4 bg-[var(--hover-bg)] rounded-xl border border-[var(--border)] space-y-3">
+            <div>
+              <p className="text-sm font-bold text-[var(--text-main)]">Organization capabilities</p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">Choose which attendance options this organization can assign to its people.</p>
+            </div>
+            <CapabilityToggle
+              checked={allowDeviceCheckIn}
+              onChange={setAllowDeviceCheckIn}
+              label="Device / phone employee check-in"
+              description="Employees assigned the device method can check in from the Android app or web app."
+            />
+            <CapabilityToggle
+              checked={allowManualCheckIn}
+              onChange={setAllowManualCheckIn}
+              label="Manual employee check-in"
+              description="Admins can record attendance manually for employees assigned the manual method."
+            />
+            <CapabilityToggle
+              checked={hasStudents}
+              onChange={setHasStudents}
+              label="Student support"
+              description="Enable student records and student-focused attendance features for this organization."
+            />
+          </div>
 
           <h3 className="font-bold text-[var(--text-main)] pt-2">Offices, Work Hours & WiFi</h3>
           {offices.map((o, i) => (
@@ -315,7 +454,7 @@ export default function Organizations() {
         })))}
       >
         {/* Table header */}
-        <div className="overflow-y-auto h-full">
+        <div className="overflow-auto h-full">
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-[var(--hover-bg)] border-b border-[var(--border)]">
               <tr>
@@ -323,6 +462,7 @@ export default function Organizations() {
                 <TH className="min-w-[200px]">Organization</TH>
                 <TH>Industry</TH>
                 <TH>Plan</TH>
+                <TH className="min-w-[210px]">Capabilities</TH>
                 <TH>Users</TH>
                 <TH>Offices</TH>
                 <th className="text-left text-xs font-semibold text-[var(--text-muted)] px-4 py-3">Action</th>
@@ -330,16 +470,19 @@ export default function Organizations() {
             </thead>
             <tbody className="divide-y divide-[var(--border)]">
               {loading ? (
-                <tr><td colSpan={7} className="text-center py-14 text-[var(--text-muted)]">
+                <tr><td colSpan={8} className="text-center py-14 text-[var(--text-muted)]">
                   <div className="flex justify-center"><div className="animate-spin rounded-full h-6 w-6 border-2 border-primary-600 border-t-transparent"/></div>
                 </td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-14">
+                <tr><td colSpan={8} className="text-center py-14">
                   <p className="text-sm font-semibold text-[var(--text-muted)]">No organizations found</p>
                 </td></tr>
               ) : filtered.map((o, idx) => {
                 const ps = PLAN_STYLE[o.subscriptionTier] ?? PLAN_STYLE.starter;
                 const color = ORG_COLORS[idx % ORG_COLORS.length];
+                const deviceEnabled = o.allowDeviceCheckIn ?? true;
+                const manualEnabled = o.allowManualCheckIn ?? false;
+                const studentsEnabled = o.hasStudents ?? false;
                 return (
                   <tr key={o.id} className="hover:bg-[var(--hover-bg)] transition-colors">
                     <td className="px-4 py-3 text-xs font-mono text-[var(--text-muted)]">{String(idx + 1).padStart(5,'0')}</td>
@@ -357,6 +500,15 @@ export default function Organizations() {
                     <td className="px-4 py-3 text-[var(--text-muted)]">{o.industry ?? '—'}</td>
                     <td className="px-4 py-3">
                       <span className="text-xs font-bold px-2.5 py-1 rounded-full capitalize" style={{ background: ps.bg, color: ps.text }}>{o.subscriptionTier}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {deviceEnabled && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Device</span>}
+                        {manualEnabled && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">Manual</span>}
+                        {studentsEnabled && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">Students</span>}
+                        {!deviceEnabled && !manualEnabled && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">No check-in</span>}
+                      </div>
+                      <p className="text-[10px] text-[var(--text-muted)] mt-1.5 whitespace-nowrap">Opens {o.openingTime ?? '08:00'} · {o.timezone ?? 'Africa/Lagos'}</p>
                     </td>
                     <td className="px-4 py-3 font-semibold text-[var(--text-main)]">{o._count?.users ?? 0}</td>
                     <td className="px-4 py-3 text-[var(--text-muted)]">{o._count?.offices ?? 0}</td>

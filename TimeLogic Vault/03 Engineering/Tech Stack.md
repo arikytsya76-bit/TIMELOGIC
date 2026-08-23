@@ -10,7 +10,7 @@ tags: [engineering, stack]
 - **Prisma ORM + PostgreSQL** — typed data layer, migrations
 - **JWT auth** + refresh tokens; **RBAC** role guards
 - **Real-time** presence + fraud alerts (socket layer)
-- Hosted on **Railway** (`prisma migrate deploy` + `node src/server.js`)
+- Currently local-only on port `5000`; public backend hosting is deferred.
 
 ## 📱 Employee apps
 - **Android:** React Native via **Expo** (EAS build → APK)
@@ -31,12 +31,12 @@ tags: [engineering, stack]
 
 ## 🚀 Infra & delivery
 - **Cloudflare Pages** — marketing, super-admin, PWA (3 projects)
-- **Railway** — backend + PostgreSQL
+- **Docker Compose** — local PostgreSQL + Redis; backend hosting comes later
 - **GitHub Releases** — desktop installer hosting
 - **Expo EAS** — Android build/distribution
 - Single **git** monorepo: `backend/ web/ pwa/ mobile/ desktop/ website/`
 
 > [!note] Why this stack
-> Managed hosting (Railway + Cloudflare) = low ops overhead. Prisma = safe, typed DB access. One web tech family (React + TS + Tailwind) = shared knowledge across surfaces. → [[How It's Clean]]
+> Local-first backend verification keeps development deterministic. Prisma = safe, typed DB access. One web tech family (React + TS + Tailwind) = shared knowledge across surfaces. → [[How It's Clean]]
 
 Related: [[Architecture]] · [[Deployment & Live URLs]]

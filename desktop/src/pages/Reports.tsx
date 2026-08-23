@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { FileSpreadsheet, FileText, RefreshCw, Download, Users, Clock, CheckCircle, XCircle, AlertTriangle, BarChart3 } from 'lucide-react';
 import Header from '../components/Header';
 import { API_URL } from '../config';
-import { getToken, api } from '../services/api';
+import { getToken, api, authenticatedFetch } from '../services/api';
 
 function Spinner() {
   return <div className="flex items-center justify-center h-32"><div className="animate-spin rounded-full h-7 w-7 border-2 border-primary-600 border-t-transparent" /></div>;
@@ -12,7 +12,7 @@ async function downloadAuth(path: string, filename: string) {
   const token = getToken();
   if (!token) { alert('Session expired.'); return; }
   try {
-    const res = await fetch(`${API_URL}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    const res = await authenticatedFetch(`${API_URL}${path}`);
     if (!res.ok) throw new Error(`Export failed (${res.status})`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -26,19 +26,22 @@ export default function Reports() {
   const [liveStats, setLiveStats] = useState<any>(null);
   const [monthlyData, setMonthlyData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [serverNow, setServerNow] = useState<Date | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const [downloading, setDownloading] = useState<'excel' | 'csv' | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const [stats, monthly] = await Promise.all([
+      const [stats, monthly, serverTime] = await Promise.all([
         api.get<any>('/reports/live-stats').then((r) => r.data ?? r).catch(() => null),
         api.get<any>('/reports/monthly').then((r) => r.data).catch(() => null),
+        api.get<any>('/reports/server-time').then((r) => r.data?.now ? new Date(r.data.now) : new Date()).catch(() => new Date()),
       ]);
       setLiveStats(stats);
       setMonthlyData(monthly);
-      setLastRefresh(new Date());
+      setServerNow(serverTime);
+      setLastRefresh(serverTime);
     } catch {} finally {
       setLoading(false);
     }
@@ -55,10 +58,15 @@ export default function Reports() {
 
   const download = async (type: 'excel' | 'csv') => {
     setDownloading(type);
-    const today = new Date().toISOString().split('T')[0];
+    const now = serverNow ?? new Date();
+    const today = new Date(now).toISOString().split('T')[0];
     await downloadAuth(`/reports/export/${type}`, `full-report-${today}.${type === 'excel' ? 'xlsx' : 'csv'}`);
     setDownloading(null);
   };
+
+  const displayRefreshedAt = serverNow
+    ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Lagos', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(serverNow)
+    : lastRefresh.toLocaleTimeString();
 
   const statCards = liveStats ? [
     { label: 'Total Employees', value: liveStats.total ?? 0, icon: Users, color: 'text-primary-700', bg: 'bg-primary-100 dark:bg-primary-900/30' },
@@ -73,7 +81,7 @@ export default function Reports() {
     <div className="flex flex-col h-full overflow-hidden">
       <Header
         title="Reports & Analytics"
-        subtitle={`Live data · Last updated ${lastRefresh.toLocaleTimeString()}`}
+        subtitle={`Live data · Last updated ${displayRefreshedAt} WAT`}
         action={
           <div className="flex items-center gap-2">
             <button onClick={() => setAutoRefresh(!autoRefresh)}

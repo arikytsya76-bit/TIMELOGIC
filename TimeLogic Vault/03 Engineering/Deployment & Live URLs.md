@@ -8,7 +8,7 @@ tags: [engineering, deployment, ops]
 ## 🌍 Live endpoints
 | Component | Host | URL |
 |---|---|---|
-| Backend API | Railway | https://backend-production-eb91.up.railway.app |
+| Backend API | Local machine | http://localhost:5000 |
 | Super-Admin web | Cloudflare Pages (`timelogic`) | https://timelogic.pages.dev |
 | Marketing site | Cloudflare Pages (`timelogic-web`) | https://timelogic-web.pages.dev |
 | iOS/Web PWA | Cloudflare Pages (`timelogic-app`) | https://timelogic-app.pages.dev |
@@ -16,7 +16,7 @@ tags: [engineering, deployment, ops]
 | Desktop installers | GitHub Releases | [.exe](https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-Setup-1.0.0.exe) · [.deb](https://github.com/akenuw/timelogic-downloads/releases/download/v1.0.0/TimeLogic-Admin-1.0.0.deb) |
 
 ## ⚙️ How each ships
-- **Backend** → `railway up` (runs `prisma migrate deploy` then starts the server).
+- **Backend** → `docker compose up -d`, migrate/seed Prisma, then `npm run dev` locally.
 - **Web / PWA / Marketing** → build → `wrangler pages deploy` to the matching Cloudflare project.
 - **Desktop** → Electron build (Docker/Wine) → `.exe` + `.deb` → uploaded to the GitHub release; the marketing site links straight to them.
 - **Android** → Expo EAS build → APK artifact.

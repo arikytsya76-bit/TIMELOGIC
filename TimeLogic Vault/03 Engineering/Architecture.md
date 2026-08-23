@@ -16,7 +16,7 @@ flowchart TB
     MKT[🌐 Marketing<br/>Next.js]
   end
 
-  subgraph Backend [☁️ Backend API · Railway]
+  subgraph Backend [Backend API · Local port 5000]
     R[Routes] --> C[Controllers]
     C --> S[Services<br/>business logic]
     S --> P[(Prisma ORM)]
@@ -26,7 +26,7 @@ flowchart TB
   DB[(PostgreSQL)]
   RT((Real-time<br/>presence + alerts))
 
-  AND & PWA & DESK & WEB -->|HTTPS / JWT| R
+  AND & PWA & DESK & WEB -->|Local HTTP / JWT| R
   MKT -. download links .-> DESK & AND
   P --> DB
   S --- RT

@@ -14,8 +14,8 @@ import type { ApiError } from "../services/api";
 import StatusBadge from "../components/StatusBadge";
 import ChallengeModal from "../components/ChallengeModal";
 
-const fmt = (t: string | null) =>
-  t ? new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true }) : "—";
+const fmt = (t: string | null, timezone?: string) =>
+  t ? new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: timezone || "Africa/Lagos" }) : "—";
 
 function greeting() {
   const h = new Date().getHours();
@@ -50,7 +50,11 @@ export default function Home({
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(timer);
+  }, [load]);
   const flash = (m: string) => { setToast(m); setTimeout(() => setToast(""), 3500); };
 
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -59,6 +63,7 @@ export default function Home({
   const onBreak = !!activeBreak;
   const sid = status?.sessionId ?? session?.sessionId ?? "";
   const faceUri = user?.profileImageUrl ? `${FILE_BASE}${user.profileImageUrl}` : null;
+  const timezone = session?.timezone || "Africa/Lagos";
 
   async function handleCheckIn() {
     setCheckingIn(true);
@@ -125,8 +130,8 @@ export default function Home({
         </div>
         <div className="flex justify-around">
           {[
-            { icon: LogInIcon, label: "Clock In", value: fmt(status?.clockInTime ?? null), color: "#1D4ED8" },
-            { icon: DoorOpen, label: "Clock Out", value: fmt(status?.clockOutTime ?? null), color: "#F97316" },
+            { icon: LogInIcon, label: "Clock In", value: fmt(status?.clockInTime ?? null, timezone), color: "#1D4ED8" },
+            { icon: DoorOpen, label: "Clock Out", value: fmt(status?.clockOutTime ?? null, timezone), color: "#F97316" },
             { icon: Clock, label: "Shift", value: user?.shiftType ?? "—", color: "#10B981" },
           ].map((it, i) => (
             <div key={it.label} className="flex items-center">
@@ -142,8 +147,8 @@ export default function Home({
         {onBreak && (
           <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-warning-bg p-2">
             <Coffee size={16} className="text-warning" />
-            <span className="text-xs text-warning-dark">
-              On {activeBreak?.breakType?.replace(/_/g, " ").toLowerCase()} break since {fmt(activeBreak?.startTime ?? null)}
+              <span className="text-xs text-warning-dark">
+              On {activeBreak?.breakType?.replace(/_/g, " ").toLowerCase()} break since {fmt(activeBreak?.startTime ?? null, timezone)}
             </span>
           </div>
         )}

@@ -14,6 +14,22 @@ export interface AuthUser {
   orgId: string;
   departmentId?: string | null;
   profileImageUrl?: string | null;  // path to face photo (used for avatar + face verification)
+  checkInMethod?: 'PHONE' | 'MANUAL' | 'BOTH';
+  phone?: string | null;
+  organization?: {
+    id: string;
+    name: string;
+    allowDeviceCheckIn: boolean;
+    allowManualCheckIn: boolean;
+    hasStudents: boolean;
+    openingTime?: string | null;
+    timezone?: string | null;
+  };
+}
+
+export function canUseDeviceCheckIn(user: AuthUser) {
+  const method = user.checkInMethod ?? 'PHONE';
+  return user.organization?.allowDeviceCheckIn !== false && (method === 'PHONE' || method === 'BOTH');
 }
 
 interface LoginResponse {
@@ -22,15 +38,20 @@ interface LoginResponse {
 }
 
 export async function loginApi(identifier: string, password: string) {
-  const isEmail = identifier.includes('@');
   // Bind this phone to the account (one device per employee, enforced server-side)
   const deviceFingerprint = await getDeviceId();
-  const body = isEmail
-    ? { email: identifier, password, deviceFingerprint }
-    : { employeeCode: identifier, password, deviceFingerprint };
-  const res = await api.post<LoginResponse>('/auth/login', body);
-  const { accessToken, refreshToken, user } = res.data;
+  const body = { email: identifier, password, deviceFingerprint };
+  const res = await api.post<LoginResponse['data']>('/auth/login', body);
+  const { accessToken, refreshToken, user } = res;
   tokenStore.set(accessToken, refreshToken);
+  if (user.role !== 'EMPLOYEE') {
+    await logoutApi();
+    throw new Error('This Android app is for employee accounts. Organization administrators must use the Desktop app.');
+  }
+  if (!canUseDeviceCheckIn(user)) {
+    await logoutApi();
+    throw new Error('This account uses manual check-in at the Admin station and cannot sign in on a phone.');
+  }
   return user;
 }
 
@@ -43,6 +64,5 @@ export async function logoutApi() {
 }
 
 export async function getMeApi(): Promise<AuthUser> {
-  const res = await api.get<{ success: boolean; data: AuthUser }>('/auth/me');
-  return res.data;
+  return api.get<AuthUser>('/auth/me');
 }

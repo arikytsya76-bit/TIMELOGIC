@@ -16,11 +16,20 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
+      devTools: isDev,
     },
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
   });
 
   Menu.setApplicationMenu(null);
+
+  // The admin shell never needs arbitrary popups or external navigation.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event, url) => {
+    const currentUrl = win.webContents.getURL();
+    if (url !== currentUrl) event.preventDefault();
+  });
 
   if (isDev) {
     win.loadURL('http://localhost:5173');

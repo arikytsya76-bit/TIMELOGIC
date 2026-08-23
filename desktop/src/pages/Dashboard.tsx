@@ -129,7 +129,7 @@ export default function Dashboard() {
                   <div className="divide-y divide-slate-50">
                     {alerts.map((a: any) => (
                       <div key={a.id} className="px-5 py-3 flex items-start gap-3">
-                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.severity === 'high' ? 'bg-red-500' : a.severity === 'medium' ? 'bg-amber-500' : 'bg-slate-300'}`} />
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${a.severity === 'HIGH' ? 'bg-red-500' : a.severity === 'MEDIUM' ? 'bg-amber-500' : 'bg-slate-300'}`} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-slate-800">{a.employee?.firstName} {a.employee?.lastName}</p>
                           <p className="text-xs text-slate-500 truncate">{a.description}</p>
