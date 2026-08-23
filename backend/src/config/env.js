@@ -30,8 +30,10 @@ const localServiceUrl = (key, fallback) => {
   return value;
 };
 
-const defaultCorsOrigins = isProduction ? '' : 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5180,http://127.0.0.1:5180';
-const localCorsOrigins = (process.env.CORS_ORIGINS || defaultCorsOrigins)
+const defaultCorsOrigins = isProduction
+  ? 'https://timelogic-superadmin.pages.dev,https://timelogic.pages.dev,https://timelogic-app.pages.dev,https://timelogic-fill-form.pages.dev'
+  : 'http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5180,http://127.0.0.1:5180';
+const localCorsOrigins = `${defaultCorsOrigins},${process.env.CORS_ORIGINS || ''}`
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean)
