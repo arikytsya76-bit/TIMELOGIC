@@ -43,7 +43,7 @@ async function request<T>(method: Method, path: string, body?: unknown, allowRef
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
   } catch {
-    throw new Error(`Cannot reach the local backend at ${API_URL}. Check the PC, Wi-Fi, and firewall.`);
+    throw new Error(`Cannot reach the TimeLogic backend at ${API_URL}. Check your connection and try again.`);
   }
 
   const data = await res.json().catch(() => null);
