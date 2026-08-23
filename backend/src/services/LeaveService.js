@@ -3,6 +3,27 @@ const { prisma } = require('../config/database');
 const NotificationService = require('./NotificationService');
 
 class LeaveService {
+  async withLifecycleStatus(leaves) {
+    const list = Array.isArray(leaves) ? leaves : [leaves];
+    const employeeIds = [...new Set(list.map((leave) => leave.employeeId).filter(Boolean))];
+    const today = new Date();
+    const returnDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const checkIns = employeeIds.length
+      ? await prisma.attendanceRecord.findMany({
+          where: { employeeId: { in: employeeIds }, date: { gte: returnDay }, clockInTime: { not: null } },
+          select: { employeeId: true },
+        })
+      : [];
+    const checkedIn = new Set(checkIns.map((record) => record.employeeId));
+    return list.map((leave) => {
+      if (leave.status !== 'APPROVED') return { ...leave, lifecycleStatus: leave.status };
+      const end = new Date(leave.endDate);
+      end.setHours(23, 59, 59, 999);
+      const lifecycleStatus = today <= end ? 'ACTIVE' : checkedIn.has(leave.employeeId) ? 'ENDED' : 'EXTENDED';
+      return { ...leave, lifecycleStatus };
+    });
+  }
+
   async requestLeave(employeeId, data) {
     const { leaveType, startDate, endDate, reason, attachmentUrls = [] } = data;
 
@@ -124,7 +145,12 @@ class LeaveService {
   }
 
   async getTeamCalendar(departmentId, month) {
-    const date = new Date(month);
+    if (!departmentId) return { department: null, leaves: [] };
+
+    const date = month ? new Date(month) : new Date();
+    if (Number.isNaN(date.getTime())) {
+      throw Object.assign(new Error('Invalid calendar month'), { status: 400 });
+    }
     const start = new Date(date.getFullYear(), date.getMonth(), 1);
     const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
 
@@ -146,7 +172,7 @@ class LeaveService {
       include: { employee: { select: { firstName: true, lastName: true } } },
     });
 
-    return { department: dept, leaves };
+    return { department: dept, leaves: await this.withLifecycleStatus(leaves) };
   }
 
   async checkConflicts(employeeId, startDate, endDate) {

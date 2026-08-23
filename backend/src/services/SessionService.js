@@ -4,6 +4,8 @@ const { redis, PREFIXES } = require('../config/redis');
 const env = require('../config/env');
 const QRTokenService = require('./QRTokenService');
 const logger = require('../config/logger');
+const { atZonedTime, zonedParts, isSunday } = require('../utils/attendanceClock');
+const { getCurrentServerTime } = require('../utils/networkTime');
 
 // Implements the State pattern for AttendanceSession lifecycle.
 const VALID_TRANSITIONS = {
@@ -17,44 +19,60 @@ const VALID_TRANSITIONS = {
 class SessionService {
   async createSession(adminId, config) {
     const { sessionName, officeId, qrRefreshInterval } = config;
+    const admin = await prisma.user.findUnique({ where: { id: adminId }, select: { orgId: true } });
+    if (!admin) throw Object.assign(new Error('Admin not found'), { status: 404 });
 
     // Snapshot office + org name and read the office work hours
     const office = await prisma.office.findUnique({
       where: { id: officeId },
-      select: { name: true, openTime: true, closeTime: true, organization: { select: { name: true } } },
+      select: { orgId: true, name: true, openTime: true, closeTime: true, timezone: true, organization: { select: { name: true } } },
     });
-    if (!office) throw Object.assign(new Error('Office not found'), { status: 404 });
+    if (!office || office.orgId !== admin.orgId) throw Object.assign(new Error('Office not found'), { status: 404 });
 
-    const now      = new Date();
-    const minOfDay = now.getHours() * 60 + now.getMinutes();
+    const now      = await getCurrentServerTime();
+    if (isSunday(now, office.timezone)) {
+      throw Object.assign(new Error('Attendance sessions are not available on Sundays.'), { status: 400 });
+    }
     const openMin  = this._toMinutes(office.openTime);
     const closeMin = this._toMinutes(office.closeTime);
+    let openAt = null;
+    let closeAt = null;
 
-    // ── Creation window: from (openTime - SESSION_LEAD) up to the OPEN TIME ──
-    // A session can only be created BEFORE the organization's opening time. Once
-    // the open time passes, manual creation is locked (the scheduler already
-    // auto-creates one at openTime - AUTO_CREATE_LEAD if the admin didn't).
+    // Sessions may only be created during the office's live work window.
     if (openMin != null) {
-      const windowStart = openMin - env.SESSION_LEAD_MIN;
-      if (minOfDay < windowStart) {
-        const hh = Math.floor(windowStart / 60), mm = windowStart % 60;
+      const local = zonedParts(now, office.timezone);
+      const localMin = local.hour * 60 + local.minute;
+      openAt = atZonedTime(now, office.openTime, office.timezone);
+      closeAt = closeMin != null ? atZonedTime(now, office.closeTime, office.timezone) : null;
+      if (closeAt && closeMin <= openMin) {
+        if (localMin < closeMin) openAt = atZonedTime(now, office.openTime, office.timezone, -1);
+        else closeAt = atZonedTime(now, office.closeTime, office.timezone, 1);
+      }
+      if (now < openAt) {
         throw Object.assign(
-          new Error(`Too early. Sessions can be created from ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')} (${env.SESSION_LEAD_MIN} min before the ${office.openTime} open time).`),
+          new Error(`Too early. Sessions can be created at the ${office.openTime} opening time (${office.timezone}).`),
           { status: 400 }
         );
       }
-      if (minOfDay > openMin) {
+      if (closeAt && now >= closeAt) {
         throw Object.assign(
-          new Error(`The ${office.openTime} opening time has passed. Sessions can only be created before the open time; if none was created the system opens one automatically.`),
+          new Error(`The ${office.closeTime} closing time (${office.timezone}) has passed. A session cannot be created after the work day closes.`),
           { status: 400 }
         );
       }
     }
 
     // ── Only ONE live session per office per day ──
-    const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
     const existing = await prisma.attendanceSession.findFirst({
-      where: { officeId, startTime: { gte: dayStart }, status: { in: ['ACTIVE', 'SCHEDULED', 'PAUSED'] } },
+      where: {
+        officeId,
+        // A workday may have only one session, even after its check-in window
+        // has ended. The next session belongs to the next office workday.
+        startTime: {
+          ...(openAt ? { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000) } : {}),
+          ...(closeAt ? { lt: closeAt } : {}),
+        },
+      },
       select: { id: true },
     });
     if (existing) {
@@ -66,7 +84,8 @@ class SessionService {
 
     // Session runs from now until the office close time
     const start  = now;
-    const autoEnd = (closeMin != null) ? this._atTime(now, office.closeTime) : new Date(start.getTime() + 8 * 3600 * 1000);
+    let autoEnd = (closeMin != null) ? atZonedTime(now, office.closeTime, office.timezone) : new Date(start.getTime() + 8 * 3600 * 1000);
+    if (autoEnd <= start && closeMin != null) autoEnd = atZonedTime(now, office.closeTime, office.timezone, 1);
 
     // Create as ACTIVE immediately and generate first QR
     const session = await prisma.attendanceSession.create({
@@ -88,37 +107,41 @@ class SessionService {
     // Generate first QR token and schedule rotation
     const token = await QRTokenService.generate(session);
     await QRTokenService.scheduleRotation(session);
+    await require('./AttendanceService').syncAdminAttendanceForSession(session.id);
     this._emitEvent('session:started', session);
 
     logger.info(`Session created+started: ${session.id} | expires at ${autoEnd.toISOString()}`);
     return { session, currentToken: token };
   }
 
-  async startSession(sessionId) {
-    const session = await this._transition(sessionId, 'ACTIVE');
+  async startSession(sessionId, orgId) {
+    await this._assertWithinOfficeHours(sessionId, orgId);
+    const session = await this._transition(sessionId, 'ACTIVE', orgId);
     const token = await QRTokenService.generate(session);
     await QRTokenService.scheduleRotation(session);
+    await require('./AttendanceService').syncAdminAttendanceForSession(session.id);
     this._emitEvent('session:started', session);
     return { session, currentToken: token };
   }
 
-  async pauseSession(sessionId) {
-    const session = await this._transition(sessionId, 'PAUSED');
+  async pauseSession(sessionId, orgId) {
+    const session = await this._transition(sessionId, 'PAUSED', orgId);
     await QRTokenService.invalidatePrevious(sessionId);
     this._emitEvent('session:paused', session);
     return session;
   }
 
-  async resumeSession(sessionId) {
-    const session = await this._transition(sessionId, 'ACTIVE');
+  async resumeSession(sessionId, orgId) {
+    await this._assertWithinOfficeHours(sessionId, orgId);
+    const session = await this._transition(sessionId, 'ACTIVE', orgId);
     const token = await QRTokenService.generate(session);
     await QRTokenService.scheduleRotation(session);
     this._emitEvent('session:resumed', session);
     return { session, currentToken: token };
   }
 
-  async endSession(sessionId) {
-    const session = await this._transition(sessionId, 'ENDED');
+  async endSession(sessionId, orgId) {
+    const session = await this._transition(sessionId, 'ENDED', orgId);
     await QRTokenService.invalidatePrevious(sessionId);
     await redis.del(`${PREFIXES.SESSION}${sessionId}`);
     this._emitEvent('session:ended', session);
@@ -126,15 +149,15 @@ class SessionService {
     return session;
   }
 
-  async lockSession(sessionId) {
-    const session = await this._transition(sessionId, 'LOCKED');
+  async lockSession(sessionId, orgId) {
+    const session = await this._transition(sessionId, 'LOCKED', orgId);
     await QRTokenService.invalidatePrevious(sessionId);
     this._emitEvent('session:locked', session);
     return session;
   }
 
-  async forceRefreshQR(sessionId) {
-    const session = await prisma.attendanceSession.findUnique({ where: { id: sessionId } });
+  async forceRefreshQR(sessionId, orgId) {
+    const session = await this._findOwnedSession(sessionId, orgId);
     if (!session || session.status !== 'ACTIVE') {
       throw Object.assign(new Error('Session must be ACTIVE to refresh QR'), { status: 400 });
     }
@@ -145,9 +168,9 @@ class SessionService {
     return token;
   }
 
-  async getLiveStatus(sessionId) {
-    const session = await prisma.attendanceSession.findUnique({
-      where: { id: sessionId },
+  async getLiveStatus(sessionId, orgId) {
+    const session = await prisma.attendanceSession.findFirst({
+      where: { id: sessionId, office: { orgId } },
       include: {
         _count: { select: { attendanceRecords: true, scanAttempts: true, fraudAlerts: true } },
       },
@@ -180,15 +203,16 @@ class SessionService {
     // Return ALL sessions for the admin's org (full history), most recent first.
     // Active sessions naturally sort to the top by startTime. Past/ENDED sessions
     // are preserved and shown too — nothing is ever hidden or removed.
-    const orgFilter = officeId
-      ? { officeId }
-      : orgId
-        ? { office: { orgId } }
-        : {};
+    const orgFilter = {
+      ...(orgId ? { office: { orgId } } : {}),
+      ...(officeId ? { officeId } : {}),
+    };
     return prisma.attendanceSession.findMany({
       where: orgFilter,
       include: {
-        office: { select: { id: true, name: true } },
+        office: { select: {
+          id: true, name: true, timezone: true, openTime: true, closeTime: true, lateAfterMinutes: true,
+        } },
         creator: { select: { id: true, firstName: true, lastName: true } },
         _count: { select: { attendanceRecords: true } },
       },
@@ -197,7 +221,8 @@ class SessionService {
     });
   }
 
-  async getCurrentQRImage(sessionId) {
+  async getCurrentQRImage(sessionId, orgId) {
+    await this._findOwnedSession(sessionId, orgId);
     const token = await prisma.qRToken.findFirst({
       where: { sessionId, isConsumed: false, expiresAt: { gt: new Date() } },
       orderBy: { generatedAt: 'desc' },
@@ -221,13 +246,41 @@ class SessionService {
     if (Number.isNaN(h) || Number.isNaN(m)) return null;
     return h * 60 + m;
   }
-  _atTime(base, hhmm) {
-    const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
-    const d = new Date(base); d.setHours(h, m, 0, 0); return d;
+
+  async _assertWithinOfficeHours(sessionId, orgId) {
+    const session = await prisma.attendanceSession.findFirst({
+      where: { id: sessionId, office: { orgId } },
+      select: { office: { select: { openTime: true, closeTime: true, timezone: true } } },
+    });
+    if (!session?.office) throw Object.assign(new Error('Session not found'), { status: 404 });
+
+    const now = await getCurrentServerTime();
+    if (isSunday(now, session.office.timezone)) {
+      throw Object.assign(new Error('Attendance sessions are not available on Sundays.'), { status: 400 });
+    }
+    const openAt = atZonedTime(now, session.office.openTime, session.office.timezone);
+    let closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone);
+    const openMin = this._toMinutes(session.office.openTime);
+    const closeMin = this._toMinutes(session.office.closeTime);
+    const local = zonedParts(now, session.office.timezone);
+    if (closeMin <= openMin && local.hour * 60 + local.minute < closeMin) {
+      const previousOpening = atZonedTime(now, session.office.openTime, session.office.timezone, -1);
+      if (previousOpening) {
+        openAt.setTime(previousOpening.getTime());
+      }
+      closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone, 1);
+    }
+
+    if (!openAt || !closeAt || now < openAt || now >= closeAt) {
+      throw Object.assign(
+        new Error(`Sessions can only be activated between ${session.office.openTime} and ${session.office.closeTime} (${session.office.timezone}).`),
+        { status: 400 }
+      );
+    }
   }
 
-  async _transition(sessionId, targetStatus) {
-    const session = await prisma.attendanceSession.findUnique({ where: { id: sessionId } });
+  async _transition(sessionId, targetStatus, orgId) {
+    const session = await this._findOwnedSession(sessionId, orgId);
     if (!session) throw Object.assign(new Error('Session not found'), { status: 404 });
 
     const allowed = VALID_TRANSITIONS[session.status] || [];
@@ -242,6 +295,14 @@ class SessionService {
       where: { id: sessionId },
       data: { status: targetStatus },
     });
+  }
+
+  async _findOwnedSession(sessionId, orgId) {
+    const session = await prisma.attendanceSession.findFirst({
+      where: { id: sessionId, ...(orgId ? { office: { orgId } } : {}) },
+    });
+    if (!session) throw Object.assign(new Error('Session not found'), { status: 404 });
+    return session;
   }
 
   _emitEvent(event, payload) {

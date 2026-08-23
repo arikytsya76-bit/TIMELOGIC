@@ -3,13 +3,14 @@ const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../config/database');
 const env = require('../config/env');
 const logger = require('../config/logger');
+const EmployeePolicy = require('../services/EmployeePolicyService');
 
 // GET /api/super/organizations — all orgs with full detail
 const listOrgs = async (req, res, next) => {
   try {
     const orgs = await prisma.organization.findMany({
       include: {
-        _count: { select: { offices: true, departments: true, users: true } },
+        _count: { select: { offices: true, departments: true, users: true, students: true } },
         offices: {
           select: {
             id: true, name: true, address: true, timezone: true, isActive: true,
@@ -19,6 +20,7 @@ const listOrgs = async (req, res, next) => {
             securitySettings: { select: { id: true } },
             _count: { select: { sessions: true } },
           },
+          orderBy: { createdAt: 'asc' },
         },
         departments: {
           select: {
@@ -39,6 +41,11 @@ const createOrg = async (req, res, next) => {
   try {
     const {
       name, industry, subscriptionTier,
+      allowDeviceCheckIn = true,
+      allowManualCheckIn = false,
+      hasStudents = false,
+      openingTime = '08:00',
+      timezone = 'Africa/Lagos',
       offices = [],       // [{ name, address, timezone }]
       departments = [],   // [{ name }]
       admin,              // { firstName, lastName, email, password, employeeCode? }
@@ -46,6 +53,10 @@ const createOrg = async (req, res, next) => {
 
     if (!name || !admin?.email || !admin?.password) {
       return res.status(400).json({ success: false, message: 'Organization name, admin email and password are required.' });
+    }
+
+    if (!allowDeviceCheckIn && !allowManualCheckIn) {
+      return res.status(400).json({ success: false, message: 'Enable phone/device check-in, manual check-in, or both.' });
     }
 
     // Check for duplicate email
@@ -59,7 +70,17 @@ const createOrg = async (req, res, next) => {
     const result = await prisma.$transaction(async (tx) => {
       // 1. Create the organization
       const org = await tx.organization.create({
-        data: { id: uuidv4(), name, industry: industry || 'General', subscriptionTier: subscriptionTier || 'starter' },
+        data: {
+          id: uuidv4(),
+          name: String(name).trim(),
+          industry: industry || 'General',
+          subscriptionTier: subscriptionTier || 'starter',
+          allowDeviceCheckIn: Boolean(allowDeviceCheckIn),
+          allowManualCheckIn: Boolean(allowManualCheckIn),
+          hasStudents: Boolean(hasStudents),
+          openingTime,
+          timezone,
+        },
       });
 
       // 2. Create offices — each carries its own Wi-Fi + work hours + break allowance
@@ -71,11 +92,11 @@ const createOrg = async (req, res, next) => {
               orgId: org.id,
               name: o.name || 'Main Office',
               address: o.address || '',
-              timezone: o.timezone || 'UTC',
+              timezone: o.timezone || timezone,
               // Each org sets its OWN Wi-Fi (Android SSID) + public IP (iOS/web network).
               wifiSSID: (o.wifiSSID && o.wifiSSID.trim()) ? o.wifiSSID.trim() : null,
               publicIp: (o.publicIp && o.publicIp.trim()) ? o.publicIp.trim() : null,
-              openTime:  o.openTime  || '08:00',
+              openTime:  o.openTime  || openingTime,
               closeTime: o.closeTime || '17:00',
               breakMinutes: Number.isFinite(+o.breakMinutes) ? parseInt(o.breakMinutes, 10) : 60,
               graceMinutes:       Number.isFinite(+o.graceMinutes)       ? parseInt(o.graceMinutes, 10)       : 30,
@@ -92,7 +113,7 @@ const createOrg = async (req, res, next) => {
 
       // Ensure at least one office
       const defaultOffice = createdOffices[0] ?? await tx.office.create({
-        data: { id: uuidv4(), orgId: org.id, name: 'Main Office', address: '', timezone: 'UTC', wifiSSID: null, openTime: '08:00', closeTime: '17:00', breakMinutes: 60 },
+        data: { id: uuidv4(), orgId: org.id, name: 'Main Office', address: '', timezone, wifiSSID: null, openTime: openingTime, closeTime: '17:00', breakMinutes: 60 },
       });
 
       // 3. Default security settings for the first office
@@ -121,12 +142,11 @@ const createOrg = async (req, res, next) => {
           firstName: admin.firstName || 'Admin',
           lastName: admin.lastName || 'User',
           email: admin.email.toLowerCase(),
-          employeeCode: admin.employeeCode || null,
           passwordHash,
           role: 'ADMIN',
           status: 'ACTIVE',
         },
-        select: { id: true, firstName: true, lastName: true, email: true, role: true, employeeCode: true },
+        select: { id: true, firstName: true, lastName: true, email: true, role: true },
       });
 
       // 6. Break policy for each department (each carries its OWN break window)
@@ -160,7 +180,44 @@ const createOrg = async (req, res, next) => {
 const updateOrg = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, industry, subscriptionTier, offices = [] } = req.body;
+    const {
+      name, industry, subscriptionTier, offices = [],
+      allowDeviceCheckIn, allowManualCheckIn, hasStudents, openingTime, timezone,
+    } = req.body;
+
+    const current = await prisma.organization.findUnique({
+      where: { id },
+      select: { allowDeviceCheckIn: true, allowManualCheckIn: true, hasStudents: true },
+    });
+    if (!current) return res.status(404).json({ success: false, message: 'Organization not found.' });
+    const nextDevice = allowDeviceCheckIn ?? current.allowDeviceCheckIn;
+    const nextManual = allowManualCheckIn ?? current.allowManualCheckIn;
+    if (!nextDevice && !nextManual) {
+      return res.status(400).json({ success: false, message: 'Enable phone/device check-in, manual check-in, or both.' });
+    }
+    if (current.allowDeviceCheckIn && !nextDevice) {
+      const openPhone = await prisma.attendanceRecord.findFirst({
+        where: { employee: { orgId: id }, clockOutTime: null, checkInSource: 'PHONE' }, select: { id: true },
+      });
+      if (openPhone) return res.status(409).json({ success: false, message: 'Phone/device check-in cannot be disabled while an employee checked in by phone is still clocked in.' });
+    }
+    if (current.allowManualCheckIn && !nextManual) {
+      const openManual = await prisma.attendanceRecord.findFirst({
+        where: { employee: { orgId: id }, clockOutTime: null, checkInSource: 'MANUAL' }, select: { id: true },
+      });
+      if (openManual) return res.status(409).json({ success: false, message: 'Manual check-in cannot be disabled while a manually checked-in employee is still clocked in.' });
+    }
+    if (current.hasStudents && hasStudents === false) {
+      const openStudent = await prisma.studentAttendance.findFirst({
+        where: { student: { orgId: id }, checkOutTime: null }, select: { id: true },
+      });
+      if (openStudent) {
+        return res.status(409).json({
+          success: false,
+          message: 'Student attendance cannot be disabled while a student is still checked in.',
+        });
+      }
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       // Update org-level fields
@@ -170,8 +227,26 @@ const updateOrg = async (req, res, next) => {
           ...(name !== undefined ? { name } : {}),
           ...(industry !== undefined ? { industry } : {}),
           ...(subscriptionTier !== undefined ? { subscriptionTier } : {}),
+          ...(allowDeviceCheckIn !== undefined ? { allowDeviceCheckIn } : {}),
+          ...(allowManualCheckIn !== undefined ? { allowManualCheckIn } : {}),
+          ...(hasStudents !== undefined ? { hasStudents } : {}),
+          ...(openingTime !== undefined ? { openingTime } : {}),
+          ...(timezone !== undefined ? { timezone } : {}),
         },
       });
+
+      // Keep every employee usable when a Super Admin turns one channel off.
+      if (!nextDevice && nextManual) {
+        await tx.user.updateMany({
+          where: { orgId: id, role: 'EMPLOYEE', checkInMethod: { in: ['PHONE', 'BOTH'] } },
+          data: { checkInMethod: 'MANUAL' },
+        });
+      } else if (nextDevice && !nextManual) {
+        await tx.user.updateMany({
+          where: { orgId: id, role: 'EMPLOYEE', checkInMethod: { in: ['MANUAL', 'BOTH'] } },
+          data: { checkInMethod: 'PHONE' },
+        });
+      }
 
       // Update each office by id
       for (const o of offices) {
@@ -192,7 +267,11 @@ const updateOrg = async (req, res, next) => {
         if (o.autoSessionMinutes !== undefined) data.autoSessionMinutes = parseInt(o.autoSessionMinutes, 10) || 60;
         if (o.breakStart !== undefined) data.breakStart = o.breakStart || null;
         if (o.breakEnd   !== undefined) data.breakEnd   = o.breakEnd   || null;
-        await tx.office.update({ where: { id: o.id }, data });
+        const ownedOffice = await tx.office.findFirst({ where: { id: o.id, orgId: id }, select: { id: true } });
+        if (!ownedOffice) {
+          throw Object.assign(new Error('One of the supplied offices does not belong to this organization.'), { status: 400 });
+        }
+        await tx.office.update({ where: { id: ownedOffice.id }, data });
 
         // Keep department break limits in sync with the office break allowance
         if (o.breakMinutes !== undefined) {
@@ -227,7 +306,11 @@ const deleteOrg = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Cannot delete an organization that contains a Super Admin account.' });
     }
 
-    await prisma.notificationLog.deleteMany({ where: { orgId: id } }).catch(() => {});
+    const orgUserIds = (await prisma.user.findMany({
+      where: { orgId: id },
+      select: { id: true },
+    })).map((user) => user.id);
+    await prisma.notificationLog.deleteMany({ where: { userId: { in: orgUserIds } } });
     await prisma.organization.delete({ where: { id } });
     res.json({ success: true, message: 'Organization and all related data removed.' });
   } catch (err) { next(err); }
@@ -275,7 +358,7 @@ const systemStats = async (req, res, next) => {
 const getNotifications = async (req, res, next) => {
   try {
     const notifs = await prisma.notificationLog.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: { sentAt: 'desc' },
       take: 20,
     });
     res.json({ success: true, data: notifs });
@@ -366,11 +449,14 @@ const resetSystem = async (req, res, next) => {
       ['scanAttempt',             () => prisma.scanAttempt.deleteMany()],
       ['breakRecord',             () => prisma.breakRecord.deleteMany()],
       ['attendanceRecord',        () => prisma.attendanceRecord.deleteMany()],
+      ['studentAttendance',       () => prisma.studentAttendance.deleteMany()],
+      ['student',                 () => prisma.student.deleteMany()],
       ['qRToken',                 () => prisma.qRToken.deleteMany()],
       ['attendanceSession',       () => prisma.attendanceSession.deleteMany()],
       ['leaveRequest',            () => prisma.leaveRequest.deleteMany()],
       ['leaveBalance',            () => prisma.leaveBalance.deleteMany()],
       ['registeredDevice',        () => prisma.registeredDevice.deleteMany()],
+      ['adminLoginEvent',         () => prisma.adminLoginEvent.deleteMany()],
       ['adminPermission',         () => prisma.adminPermission.deleteMany()],
       ['refreshToken (non-SA)',   () => prisma.refreshToken.deleteMany({ where: { userId: { notIn: saIds } } })],
       ['breakPolicy',             () => prisma.breakPolicy.deleteMany()],
@@ -442,20 +528,27 @@ const reassignEmployee = async (req, res, next) => {
     const { orgId } = req.body;
     if (!orgId) return res.status(400).json({ success: false, message: 'Target organization is required.' });
 
-    const user = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { role: true, orgId: true } });
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.userId },
+      select: { role: true, orgId: true },
+    });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     if (user.role !== 'EMPLOYEE') return res.status(403).json({ success: false, message: 'Only employees can be reassigned. Admins cannot be reassigned.' });
 
-    const targetOrg = await prisma.organization.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
-    if (!targetOrg || targetOrg.id === 'platform-org') return res.status(400).json({ success: false, message: 'Invalid target organization.' });
-
-    // Move to the new org; clear department (departments are org-specific) and sign them out
-    await prisma.user.update({
-      where: { id: req.params.userId },
-      data: { orgId, departmentId: null },
+    const targetOrg = await prisma.organization.findUnique({
+      where: { id: orgId },
+      select: { id: true, name: true },
     });
-    await prisma.refreshToken.deleteMany({ where: { userId: req.params.userId } });
-    res.json({ success: true, message: `Employee reassigned to ${targetOrg.name}` });
+    if (!targetOrg || targetOrg.id === 'platform-org') return res.status(400).json({ success: false, message: 'Invalid target organization.' });
+    if (orgId === user.orgId) return res.status(400).json({ success: false, message: 'Employee already belongs to that organization.' });
+    // User-linked attendance, leave, device, fraud, and payroll history is
+    // tenant-owned. Moving a mutable user row would make that old history appear
+    // inside the target organization. Reassignment is therefore deliberately
+    // disabled until records carry immutable organization snapshots.
+    return res.status(409).json({
+      success: false,
+      message: `Employee accounts cannot be moved between organizations because their audit history belongs to the original organization. Create a new employee account in ${targetOrg.name}.`,
+    });
   } catch (err) { next(err); }
 };
 
@@ -464,16 +557,21 @@ const systemReport = async (req, res, next) => {
   try {
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const [totalOrgs, totalEmployees, totalAdmins, presentToday, lateToday, openAlerts, pendingLeaves] = await Promise.all([
+    const [totalOrgs, totalEmployees, totalAdmins, presentToday, lateToday, openAlerts, pendingLeaves, recentAttendance] = await Promise.all([
       prisma.organization.count(),
       prisma.user.count({ where: { role: 'EMPLOYEE', status: 'ACTIVE' } }),
       prisma.user.count({ where: { role: { in: ['ADMIN', 'SUPER_ADMIN'] } } }),
-      prisma.attendanceRecord.count({ where: { date: { gte: new Date(now.setHours(0,0,0,0)) }, status: 'PRESENT' } }),
-      prisma.attendanceRecord.count({ where: { date: { gte: new Date(now.setHours(0,0,0,0)) }, status: 'LATE' } }),
+      prisma.attendanceRecord.count({ where: { date: { gte: new Date(now.setHours(0,0,0,0)) }, status: 'PRESENT', employee: { role: 'EMPLOYEE' } } }),
+      prisma.attendanceRecord.count({ where: { date: { gte: new Date(now.setHours(0,0,0,0)) }, status: 'LATE', employee: { role: 'EMPLOYEE' } } }),
       prisma.fraudAlert.count({ where: { status: 'NEW' } }),
       prisma.leaveRequest.count({ where: { status: 'PENDING' } }),
+      prisma.attendanceRecord.findMany({
+        where: { clockInTime: { not: null }, employee: { role: 'EMPLOYEE' } },
+        include: { employee: { select: { firstName: true, lastName: true } }, session: { select: { sessionName: true } } },
+        orderBy: { clockInTime: 'desc' }, take: 10,
+      }),
     ]);
-    res.json({ success: true, data: { totalOrgs, totalEmployees, totalAdmins, presentToday, lateToday, openAlerts, pendingLeaves, period: now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) } });
+    res.json({ success: true, data: { totalOrgs, totalEmployees, totalAdmins, presentToday, lateToday, openAlerts, pendingLeaves, recentAttendance, period: now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) } });
   } catch (err) { next(err); }
 };
 

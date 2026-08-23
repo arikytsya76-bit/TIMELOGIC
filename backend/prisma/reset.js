@@ -28,11 +28,14 @@ async function main() {
     ['scanAttempt',            () => prisma.scanAttempt.deleteMany()],
     ['breakRecord',            () => prisma.breakRecord.deleteMany()],
     ['attendanceRecord',       () => prisma.attendanceRecord.deleteMany()],
+    ['studentAttendance',      () => prisma.studentAttendance.deleteMany()],
+    ['student',                () => prisma.student.deleteMany()],
     ['qRToken',                () => prisma.qRToken.deleteMany()],
     ['attendanceSession',      () => prisma.attendanceSession.deleteMany()],
     ['leaveRequest',           () => prisma.leaveRequest.deleteMany()],
     ['leaveBalance',           () => prisma.leaveBalance.deleteMany()],
     ['registeredDevice',       () => prisma.registeredDevice.deleteMany()],
+    ['adminLoginEvent',        () => prisma.adminLoginEvent.deleteMany()],
     ['adminPermission',        () => prisma.adminPermission.deleteMany()],
     ['refreshToken',           () => prisma.refreshToken.deleteMany()],
     ['breakPolicy',            () => prisma.breakPolicy.deleteMany()],
@@ -67,5 +70,10 @@ async function main() {
 }
 
 main()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect());
+  .catch((error) => {
+    console.error('Database reset failed:', error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

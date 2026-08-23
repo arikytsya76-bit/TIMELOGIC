@@ -1,14 +1,13 @@
 const AuthService = require('../services/AuthenticationService');
 const { prisma } = require('../config/database');
-const bcrypt = require('bcryptjs');
-const { v4: uuidv4 } = require('uuid');
-const env = require('../config/env');
 
 const login = async (req, res, next) => {
   try {
-    const { email, employeeCode, password, deviceFingerprint } = req.body;
-    const identifier = employeeCode ?? email;
-    const result = await AuthService.login(identifier, password, deviceFingerprint);
+    const { email, password, deviceFingerprint } = req.body;
+    const result = await AuthService.login(email, password, deviceFingerprint, {
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent'),
+    });
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
 };
@@ -36,11 +35,21 @@ const me = async (req, res, next) => {
       select: {
         id: true, firstName: true, lastName: true, email: true,
         role: true, status: true, shiftType: true,
+        checkInMethod: true, phone: true,
         profileImageUrl: true, employeeCode: true,
         departmentId: true, orgId: true, lastLoginAt: true, createdAt: true,
         department: { select: { name: true } },
+        organization: {
+          select: {
+            id: true, name: true, allowDeviceCheckIn: true, allowManualCheckIn: true,
+            hasStudents: true, openingTime: true, timezone: true,
+          },
+        },
       },
     });
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User unavailable' });
+    }
     res.json({ success: true, data: user });
   } catch (err) { next(err); }
 };
@@ -53,37 +62,4 @@ const changePassword = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// Admin-only: create a new user
-const createUser = async (req, res, next) => {
-  try {
-    const { firstName, lastName, email, password, role, departmentId, shiftType } = req.body;
-    const passwordHash = await bcrypt.hash(password, env.BCRYPT_ROUNDS);
-
-    const user = await prisma.user.create({
-      data: {
-        id: uuidv4(),
-        orgId: req.user.orgId,
-        firstName,
-        lastName,
-        email,
-        passwordHash,
-        role: role || 'EMPLOYEE',
-        departmentId,
-        shiftType: shiftType || 'FLEXIBLE',
-      },
-      select: { id: true, firstName: true, lastName: true, email: true, role: true, status: true },
-    });
-
-    const LeaveService = require('../services/LeaveService');
-    await LeaveService.initBalances(user.id, new Date().getFullYear());
-
-    res.status(201).json({ success: true, data: user });
-  } catch (err) {
-    if (err.code === 'P2002') {
-      return next(Object.assign(new Error('Email already exists'), { status: 409 }));
-    }
-    next(err);
-  }
-};
-
-module.exports = { login, logout, refresh, me, changePassword, createUser };
+module.exports = { login, logout, refresh, me, changePassword };

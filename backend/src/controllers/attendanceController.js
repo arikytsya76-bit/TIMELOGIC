@@ -1,18 +1,34 @@
 const AttendanceService = require('../services/AttendanceService');
 const { prisma } = require('../config/database');
+const EmployeePolicy = require('../services/EmployeePolicyService');
+const { dateKey } = require('../utils/attendanceClock');
+const { getCurrentServerTime } = require('../utils/networkTime');
 
 // GET /api/attendance/current-session
 // Returns the active session for the employee's org (used by mobile check-in button)
 const getCurrentSession = async (req, res, next) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.user.id }, select: { orgId: true },
+      where: { id: req.user.id },
+      select: {
+        orgId: true, role: true, checkInMethod: true,
+        organization: { select: { allowDeviceCheckIn: true, allowManualCheckIn: true } },
+      },
     });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    if (user.role !== 'EMPLOYEE') return res.status(403).json({ success: false, message: 'Employee account required.' });
+    EmployeePolicy.assertChannelAllowed(user.organization, user.checkInMethod, 'PHONE');
 
+    const now = await getCurrentServerTime();
     const session = await prisma.attendanceSession.findFirst({
-      where: { office: { orgId: user.orgId }, status: 'ACTIVE' },
-      include: { office: { select: { name: true } } },
+      where: {
+        office: { orgId: user.orgId }, status: 'ACTIVE',
+        startTime: { lte: now },
+        OR: [{ endTime: null }, { endTime: { gt: now } }],
+      },
+      include: { office: { select: {
+        name: true, timezone: true, openTime: true, closeTime: true, lateAfterMinutes: true,
+      } } },
       orderBy: { startTime: 'desc' },
     });
 
@@ -20,8 +36,8 @@ const getCurrentSession = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'No active session for your organization' });
     }
 
-    const elapsed   = (Date.now() - session.startTime.getTime()) / 60000;
-    const remaining = session.endTime ? Math.max(0, (session.endTime.getTime() - Date.now()) / 60000) : null;
+    const elapsed   = (now.getTime() - session.startTime.getTime()) / 60000;
+    const remaining = session.endTime ? Math.max(0, (session.endTime.getTime() - now.getTime()) / 60000) : null;
 
     res.json({
       success: true,
@@ -29,6 +45,10 @@ const getCurrentSession = async (req, res, next) => {
         sessionId:        session.id,
         sessionName:      session.sessionName,
         office:           session.office?.name,
+        timezone:         session.office?.timezone || 'Africa/Lagos',
+        openTime:         session.office?.openTime,
+        closeTime:        session.office?.closeTime,
+        lateAfterMinutes: session.office?.lateAfterMinutes,
         status:           session.status,
         startTime:        session.startTime,
         endTime:          session.endTime,
@@ -55,6 +75,7 @@ const REASON_MESSAGES = {
   CHALLENGE_EXPIRED:  'Your check-in code expired. Tap Check In again.',
   CHALLENGE_FAILED:   'The verification code is incorrect.',
   CHECKIN_CLOSED:     'Check-in window has closed for today.',
+  SUNDAY_CLOSED:      'Attendance is not recorded on Sundays.',
 };
 
 // GET /api/attendance/network — returns the caller's public IP (for office-IP setup
@@ -108,6 +129,12 @@ const getStatus = async (req, res, next) => {
   try {
     const { date } = req.query;
     const employeeId = req.params.employeeId || req.user.id;
+    if (req.params.employeeId) {
+      const target = await prisma.user.findFirst({
+        where: { id: employeeId, orgId: req.user.orgId, role: 'EMPLOYEE' }, select: { id: true },
+      });
+      if (!target) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    }
     const record = await AttendanceService.getStatus(employeeId, date);
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
@@ -117,39 +144,50 @@ const getHistory = async (req, res, next) => {
   try {
     const now = new Date();
     const defaultStart = new Date(now); defaultStart.setDate(now.getDate() - 30);
-    const startDate = req.query.startDate || defaultStart.toISOString().split('T')[0];
-    const endDate   = req.query.endDate   || now.toISOString().split('T')[0];
-    const { page = 1, limit = 30 } = req.query;
+    const organization = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { timezone: true } });
+    const timezone = organization?.timezone || 'Africa/Lagos';
+    const startDate = req.query.startDate || dateKey(defaultStart, timezone);
+    const endDate   = req.query.endDate   || dateKey(now, timezone);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 30));
 
     if (req.params.employeeId) {
       // Admin requesting a specific employee's history
-      const result = await AttendanceService.getHistory(req.params.employeeId, { startDate, endDate, page: +page, limit: +limit });
+      const target = await prisma.user.findFirst({
+        where: { id: req.params.employeeId, orgId: req.user.orgId, role: 'EMPLOYEE' }, select: { id: true },
+      });
+      if (!target) return res.status(404).json({ success: false, message: 'Employee not found.' });
+      const result = await AttendanceService.getHistory(req.params.employeeId, { startDate, endDate, page, limit });
       return res.json({ success: true, ...result });
     }
 
     // Admin requesting ALL employees' attendance for their org
     if (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') {
-      const skip = (+page - 1) * +limit;
+      const skip = (page - 1) * limit;
       const where = {
         employee: { orgId: req.user.orgId },
-        date: { gte: new Date(startDate), lte: new Date(endDate) },
+        // AttendanceRecord.date is a calendar date, not a timestamp. Compare
+        // the requested local date keys directly to avoid timezone shifts.
+        date: { gte: new Date(`${startDate}T00:00:00.000Z`), lte: new Date(`${endDate}T00:00:00.000Z`) },
       };
       const [records, total] = await Promise.all([
         prisma.attendanceRecord.findMany({
-          where, skip, take: +limit,
+          where, skip, take: limit,
           include: {
             employee: { select: { id: true, firstName: true, lastName: true, email: true, employeeCode: true, department: { select: { name: true } } } },
-            session: { select: { sessionName: true } },
+            session: { select: { sessionName: true, office: { select: { name: true, timezone: true } } } },
+            checkInRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
+            checkOutRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
           },
           orderBy: { date: 'desc' },
         }),
         prisma.attendanceRecord.count({ where }),
       ]);
-      return res.json({ success: true, data: records, total, page: +page, totalPages: Math.ceil(total / +limit) });
+      return res.json({ success: true, data: records, total, page, totalPages: Math.ceil(total / limit) });
     }
 
     // Employee requesting their own history
-    const result = await AttendanceService.getHistory(req.user.id, { startDate, endDate, page: +page, limit: +limit });
+    const result = await AttendanceService.getHistory(req.user.id, { startDate, endDate, page, limit });
     res.json({ success: true, data: result.records, total: result.total, page: result.page, totalPages: result.totalPages });
   } catch (err) { next(err); }
 };
@@ -157,15 +195,42 @@ const getHistory = async (req, res, next) => {
 const flagRecord = async (req, res, next) => {
   try {
     const { reason } = req.body;
-    const record = await AttendanceService.flagRecord(req.params.recordId, reason, req.user.id);
+    const record = await AttendanceService.flagRecord(req.params.recordId, reason, req.user.id, req.user.orgId);
     res.json({ success: true, data: record });
+  } catch (err) { next(err); }
+};
+
+const getLiveAttendance = async (req, res, next) => {
+  try {
+    const now = await getCurrentServerTime();
+    const organization = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { timezone: true } });
+    const today = new Date(`${dateKey(now, organization?.timezone || 'Africa/Lagos')}T00:00:00.000Z`);
+    const records = await prisma.attendanceRecord.findMany({
+      where: {
+        employee: { orgId: req.user.orgId },
+        OR: [
+          { date: today },
+          { session: { status: 'ACTIVE', office: { orgId: req.user.orgId } } },
+        ],
+      },
+      include: {
+        employee: { select: { id: true, firstName: true, lastName: true, email: true, employeeCode: true, role: true, department: { select: { name: true } } } },
+        session: { select: { sessionName: true, status: true, office: { select: { name: true, timezone: true } } } },
+        checkInRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
+        checkOutRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
+      },
+      orderBy: [{ clockInTime: 'desc' }, { date: 'desc' }],
+      take: 500,
+    });
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: records, total: records.length, serverTime: now });
   } catch (err) { next(err); }
 };
 
 const approveRecord = async (req, res, next) => {
   try {
     const { notes } = req.body;
-    const record = await AttendanceService.approveRecord(req.params.recordId, req.user.id, notes);
+    const record = await AttendanceService.approveRecord(req.params.recordId, req.user.id, notes, req.user.orgId);
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
 };
@@ -188,4 +253,4 @@ const getFlagged = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { network, issueChallenge, checkIn, checkOut, heartbeat, getStatus, getHistory, flagRecord, approveRecord, getFlagged, getCurrentSession };
+module.exports = { network, issueChallenge, checkIn, checkOut, heartbeat, getStatus, getHistory, getLiveAttendance, flagRecord, approveRecord, getFlagged, getCurrentSession };

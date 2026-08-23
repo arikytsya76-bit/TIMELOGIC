@@ -8,7 +8,12 @@ let io;
 function initIO(httpServer) {
   io = new Server(httpServer, {
     cors: {
-      origin: env.CORS_ORIGINS,
+      origin: (origin, callback) => {
+        if (!origin || origin === 'null' || env.isAllowedFrontendOrigin(origin)) {
+          return callback(null, true);
+        }
+        return callback(null, false);
+      },
       methods: ['GET', 'POST'],
       credentials: true,
     },
@@ -32,6 +37,7 @@ function initIO(httpServer) {
     logger.debug(`Socket connected: user=${id} role=${role}`);
 
     // Users join their org room automatically; admins also join the admin room
+    socket.join(`user:${id}`);
     socket.join(`org:${orgId}`);
     if (['ADMIN', 'SUPER_ADMIN'].includes(role)) {
       socket.join(`admin:${orgId}`);
@@ -64,6 +70,6 @@ function getIO() {
 function emitToOrg(orgId, event, data)     { io?.to(`org:${orgId}`).emit(event, data); }
 function emitToAdmins(orgId, event, data)  { io?.to(`admin:${orgId}`).emit(event, data); }
 function emitToSession(sessionId, event, data) { io?.to(`session:${sessionId}`).emit(event, data); }
-function emitToUser(userId, event, data)   { io?.to(userId).emit(event, data); }
+function emitToUser(userId, event, data)   { io?.to(`user:${userId}`).emit(event, data); }
 
 module.exports = { initIO, getIO, emitToOrg, emitToAdmins, emitToSession, emitToUser };

@@ -2,16 +2,23 @@ const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../config/database');
 const NotificationService = require('./NotificationService');
 const logger = require('../config/logger');
+const { atZonedTime, dayBounds, zonedParts } = require('../utils/attendanceClock');
 
 const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 
 class BreakService {
-  async startBreak(employeeId, breakType, notes = null) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  withLifecycleStatus(records) {
+    return (Array.isArray(records) ? records : [records]).map((record) => ({
+      ...record,
+      lifecycleStatus: record.endTime ? (record.isAutoEnded ? 'EXTENDED' : 'ENDED') : 'ACTIVE',
+    }));
+  }
 
+  async startBreak(employeeId, breakType, notes = null) {
     const record = await prisma.attendanceRecord.findFirst({
-      where: { employeeId, date: today, clockInTime: { not: null } },
+      where: { employeeId, clockInTime: { not: null }, clockOutTime: null },
+      orderBy: { clockInTime: 'desc' },
+      include: { session: { select: { office: { select: { timezone: true } } } } },
     });
     if (!record) throw Object.assign(new Error('No active attendance record for today'), { status: 404 });
 
@@ -23,7 +30,8 @@ class BreakService {
     // ── Enforce the DEPARTMENT's break window (each department has its own) ──
     if (policy?.breakStart && policy?.breakEnd) {
       const now = new Date();
-      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const local = zonedParts(now, record.session?.office?.timezone || 'Africa/Lagos');
+      const nowMin = local.hour * 60 + local.minute;
       if (nowMin < toMin(policy.breakStart) || nowMin > toMin(policy.breakEnd)) {
         throw Object.assign(
           new Error(`Your department break is only allowed between ${policy.breakStart} and ${policy.breakEnd}.`),
@@ -32,7 +40,7 @@ class BreakService {
       }
     }
 
-    const todayBreaks = await this.getDailyBreaks(employeeId, today);
+    const todayBreaks = await this.getDailyBreaks(employeeId, new Date());
     const check = await this.checkBreakPolicy(employeeId, policy, todayBreaks, breakType);
     if (!check.allowed) throw Object.assign(new Error(check.reason), { status: 400 });
 
@@ -51,10 +59,12 @@ class BreakService {
     const endTime = new Date();
     const durationMinutes = Math.floor((endTime - breakRecord.startTime) / 60000);
 
-    const updated = await prisma.breakRecord.update({
-      where: { id: breakId },
+    const changed = await prisma.breakRecord.updateMany({
+      where: { id: breakId, employeeId, endTime: null },
       data: { endTime, durationMinutes },
     });
+    if (!changed.count) throw Object.assign(new Error('Break is already ended'), { status: 409 });
+    const updated = await prisma.breakRecord.findUnique({ where: { id: breakId } });
     await prisma.attendanceRecord.update({
       where: { id: breakRecord.attendanceRecordId },
       data: { totalBreakMinutes: { increment: durationMinutes } },
@@ -84,10 +94,15 @@ class BreakService {
   }
 
   async getDailyBreaks(employeeId, date) {
-    const d = date ? new Date(date) : new Date();
-    d.setHours(0, 0, 0, 0);
-    const end = new Date(d); end.setHours(23, 59, 59, 999);
-    return prisma.breakRecord.findMany({ where: { employeeId, startTime: { gte: d, lte: end } }, orderBy: { startTime: 'asc' } });
+    const employee = await prisma.user.findUnique({
+      where: { id: employeeId }, select: { organization: { select: { timezone: true } } },
+    });
+    const bounds = dayBounds(date ? new Date(date) : new Date(), employee?.organization?.timezone || 'Africa/Lagos');
+    const records = await prisma.breakRecord.findMany({
+      where: { employeeId, startTime: { gte: bounds.start, lt: bounds.end } },
+      orderBy: { startTime: 'asc' },
+    });
+    return this.withLifecycleStatus(records);
   }
 
   async checkBreakPolicy(employeeId, policy, todayBreaks, breakType) {
@@ -108,7 +123,7 @@ class BreakService {
     const active = await prisma.breakRecord.findMany({
       where: { endTime: null },
       include: {
-        attendanceRecord: { select: { sessionId: true } },
+        attendanceRecord: { select: { sessionId: true, session: { select: { office: { select: { timezone: true } } } } } },
         employee: { select: { department: { select: { breakPolicy: { select: { breakEnd: true, autoEndAfterMinutes: true } } } } } },
       },
     });
@@ -122,7 +137,8 @@ class BreakService {
       // Hard deadline = the department breakEnd today, or startTime + autoAfter, whichever is sooner.
       let deadline = new Date(b.startTime.getTime() + autoAfter * 60000);
       if (pol?.breakEnd) {
-        const d = new Date(now); const [h, m] = pol.breakEnd.split(':').map(Number); d.setHours(h, m, 0, 0);
+        let d = atZonedTime(b.startTime, pol.breakEnd, b.attendanceRecord?.session?.office?.timezone || 'Africa/Lagos');
+        if (d < b.startTime) d = atZonedTime(b.startTime, pol.breakEnd, b.attendanceRecord?.session?.office?.timezone || 'Africa/Lagos', 1);
         if (d < deadline) deadline = d;
       }
       if (now <= deadline) continue;

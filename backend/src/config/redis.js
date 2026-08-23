@@ -20,6 +20,7 @@ const PREFIXES = {
   CHALLENGE:       'challenge:',
   PRESENCE:        'presence:',
   ADMIN_PRESENT:   'adminpresent:',
+  SESSION_AUTO_LOCK: 'session-auto-lock:',
 };
 
 module.exports = { redis, PREFIXES };

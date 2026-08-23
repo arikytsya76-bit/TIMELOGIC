@@ -18,7 +18,9 @@ async function main() {
   startQRRotationWorker();
   startSessionScheduler();
 
-  server.listen(env.PORT, () => {
+  // Bind IPv4 explicitly so Android devices can reach the Windows LAN address.
+  // Recent Windows/Node combinations may treat the IPv6 wildcard as v6-only.
+  server.listen(env.PORT, '0.0.0.0', () => {
     logger.info(`Server running on port ${env.PORT} [${env.NODE_ENV}]`);
   });
 

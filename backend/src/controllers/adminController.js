@@ -1,6 +1,8 @@
 const { prisma } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
 const EmergencyControlService = require('../services/EmergencyControlService');
+const AttendanceService = require('../services/AttendanceService');
+const EmployeePolicy = require('../services/EmployeePolicyService');
 
 // ── Organization / Office / Department ────────────────────────────────────────
 
@@ -9,7 +11,7 @@ const getOrg = async (req, res, next) => {
     const org = await prisma.organization.findUnique({
       where: { id: req.user.orgId },
       include: {
-        offices: { include: { securitySettings: true, _count: { select: { sessions: true } } } },
+        offices: { orderBy: { createdAt: 'asc' }, include: { securitySettings: true, _count: { select: { sessions: true } } } },
         departments: { include: { _count: { select: { employees: true } } } },
         _count: { select: { users: true } },
       },
@@ -45,6 +47,12 @@ const createOffice = async (req, res, next) => {
 const createDepartment = async (req, res, next) => {
   try {
     const { name, managerId } = req.body;
+    if (managerId) {
+      const manager = await prisma.user.findFirst({
+        where: { id: managerId, orgId: req.user.orgId }, select: { id: true },
+      });
+      if (!manager) return res.status(400).json({ success: false, message: 'Manager does not belong to your organization.' });
+    }
     const dept = await prisma.department.create({
       data: { id: uuidv4(), orgId: req.user.orgId, name, managerId },
     });
@@ -80,6 +88,7 @@ const listUsers = async (req, res, next) => {
           id: true, firstName: true, lastName: true, email: true,
           role: true, status: true, shiftType: true,
           profileImageUrl: true, employeeCode: true,
+          phone: true, checkInMethod: true,
           departmentId: true, createdAt: true, lastLoginAt: true,
           department: { select: { name: true } },
           _count: { select: { devices: true } },
@@ -103,15 +112,45 @@ const updateUser = async (req, res, next) => {
     if (!target || target.orgId !== req.user.orgId) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    if (target.role === 'SUPER_ADMIN') {
-      return res.status(403).json({ success: false, message: 'Cannot modify a Super Admin' });
+    if (target.role !== 'EMPLOYEE') {
+      return res.status(403).json({ success: false, message: 'Only employee accounts can be modified here.' });
     }
 
-    const { firstName, lastName, role, status, departmentId, shiftType } = req.body;
+    const { firstName, lastName, status, departmentId, shiftType, checkInMethod, phone } = req.body;
+    if (departmentId) {
+      const department = await prisma.department.findFirst({
+        where: { id: departmentId, orgId: req.user.orgId }, select: { id: true },
+      });
+      if (!department) return res.status(400).json({ success: false, message: 'Department does not belong to your organization.' });
+    }
+    let allowedMethod;
+    if (checkInMethod !== undefined) {
+      const org = await EmployeePolicy.getOrganizationPolicy(req.user.orgId);
+      allowedMethod = EmployeePolicy.assertMethodAllowed(org, checkInMethod);
+      const openRecord = await prisma.attendanceRecord.findFirst({
+        where: { employeeId: req.params.userId, clockOutTime: null },
+        select: { checkInSource: true },
+      });
+      const nextCapabilities = EmployeePolicy.methodCapabilities(allowedMethod);
+      if (
+        (openRecord?.checkInSource === 'PHONE' && !nextCapabilities.phone) ||
+        (openRecord?.checkInSource === 'MANUAL' && !nextCapabilities.manual)
+      ) {
+        return res.status(409).json({ success: false, message: 'Check this employee out before changing their check-in method.' });
+      }
+    }
     const user = await prisma.user.update({
       where: { id: req.params.userId },
-      data: { firstName, lastName, role, status, departmentId, shiftType },
-      select: { id: true, firstName: true, lastName: true, email: true, role: true, status: true },
+      data: {
+        ...(firstName !== undefined ? { firstName } : {}),
+        ...(lastName !== undefined ? { lastName } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(departmentId !== undefined ? { departmentId: departmentId || null } : {}),
+        ...(shiftType !== undefined ? { shiftType } : {}),
+        ...(allowedMethod !== undefined ? { checkInMethod: allowedMethod } : {}),
+        ...(phone !== undefined ? { phone: phone || null } : {}),
+      },
+      select: { id: true, firstName: true, lastName: true, email: true, role: true, status: true, checkInMethod: true, phone: true },
     });
     res.json({ success: true, data: user });
   } catch (err) { next(err); }
@@ -121,7 +160,7 @@ const suspendUser = async (req, res, next) => {
   try {
     // Tenant isolation + never suspend a Super Admin
     const result = await prisma.user.updateMany({
-      where: { id: req.params.userId, orgId: req.user.orgId, role: { not: 'SUPER_ADMIN' } },
+      where: { id: req.params.userId, orgId: req.user.orgId, role: 'EMPLOYEE' },
       data: { status: 'SUSPENDED' },
     });
     if (result.count === 0) {
@@ -137,7 +176,7 @@ const suspendUser = async (req, res, next) => {
 const getSecuritySettings = async (req, res, next) => {
   try {
     const settings = await prisma.securitySettings.findFirst({
-      where: { officeId: req.params.officeId },
+      where: { officeId: req.params.officeId, office: { orgId: req.user.orgId } },
     });
     res.json({ success: true, data: settings });
   } catch (err) { next(err); }
@@ -176,6 +215,10 @@ const updateSecuritySettings = async (req, res, next) => {
 const setBreakPolicy = async (req, res, next) => {
   try {
     const { departmentId } = req.params;
+    const department = await prisma.department.findFirst({
+      where: { id: departmentId, orgId: req.user.orgId }, select: { id: true },
+    });
+    if (!department) return res.status(404).json({ success: false, message: 'Department not found.' });
     const policy = await prisma.breakPolicy.upsert({
       where: { departmentId },
       create: { id: uuidv4(), departmentId, ...req.body },
@@ -191,7 +234,7 @@ const setBreakPolicy = async (req, res, next) => {
 async function resolveOfficeId(officeIdOrOrgId, orgId) {
   if (officeIdOrOrgId) {
     // Check if it's a valid officeId
-    const asOffice = await prisma.office.findUnique({ where: { id: officeIdOrOrgId }, select: { id: true } });
+    const asOffice = await prisma.office.findFirst({ where: { id: officeIdOrOrgId, orgId }, select: { id: true } });
     if (asOffice) return asOffice.id;
   }
   // Fall back to first active office for the admin's org
@@ -242,9 +285,13 @@ const env = require('../config/env');
 
 const getNotifications = async (req, res, next) => {
   try {
-    const notifs = await prisma.notificationLog.findMany({
+    const orgUserIds = (await prisma.user.findMany({
       where: { orgId: req.user.orgId },
-      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    })).map((user) => user.id);
+    const notifs = await prisma.notificationLog.findMany({
+      where: { userId: { in: orgUserIds } },
+      orderBy: { sentAt: 'desc' },
       take: 20,
     });
     res.json({ success: true, data: notifs });
@@ -257,13 +304,17 @@ const PLAN_NAMES  = { starter: 'Starter', business: 'Business', enterprise: 'Ent
 
 const createEmployee = async (req, res, next) => {
   try {
-    const { firstName, lastName, email, password, employeeCode, departmentId, shiftType, phone } = req.body;
+    const { firstName, lastName, email, password, employeeCode, departmentId, shiftType, phone, checkInMethod = 'PHONE' } = req.body;
 
     // ── Subscription enforcement ──────────────────────────────────────────────
     const org = await prisma.organization.findUnique({
       where: { id: req.user.orgId },
-      select: { subscriptionTier: true, name: true },
+      select: {
+        subscriptionTier: true, name: true,
+        allowDeviceCheckIn: true, allowManualCheckIn: true,
+      },
     });
+    const allowedMethod = EmployeePolicy.assertMethodAllowed(org, checkInMethod);
     const tier   = (org?.subscriptionTier ?? 'starter').toLowerCase();
     const limit  = PLAN_LIMITS[tier] ?? 20;
     if (limit !== Infinity) {
@@ -285,6 +336,16 @@ const createEmployee = async (req, res, next) => {
 
     const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
     if (existing) return res.status(400).json({ success: false, message: 'Email already in use.' });
+    if (employeeCode) {
+      const codeOwner = await prisma.user.findFirst({ where: { orgId: req.user.orgId, employeeCode } });
+      if (codeOwner) return res.status(400).json({ success: false, message: 'Employee code already in use.' });
+    }
+    if (departmentId) {
+      const department = await prisma.department.findFirst({
+        where: { id: departmentId, orgId: req.user.orgId }, select: { id: true },
+      });
+      if (!department) return res.status(400).json({ success: false, message: 'Department does not belong to your organization.' });
+    }
     const passwordHash = await bcrypt.hash(password, +(env.BCRYPT_ROUNDS || 12));
     const user = await prisma.user.create({
       data: {
@@ -298,8 +359,10 @@ const createEmployee = async (req, res, next) => {
         status: 'ACTIVE',
         shiftType: shiftType || 'MORNING',
         departmentId: departmentId || null,
+        phone: phone || null,
+        checkInMethod: allowedMethod,
       },
-      select: { id: true, firstName: true, lastName: true, email: true, employeeCode: true, role: true, status: true, shiftType: true },
+      select: { id: true, firstName: true, lastName: true, email: true, employeeCode: true, role: true, status: true, shiftType: true, phone: true, checkInMethod: true },
     });
     // Initialize leave balances
     const types = ['ANNUAL','SICK','CASUAL','MATERNITY','PATERNITY','UNPAID','COMPASSIONATE'];
@@ -317,7 +380,7 @@ const deleteEmployee = async (req, res, next) => {
     const { userId } = req.params;
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true, role: true, status: true } });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    if (user.role === 'SUPER_ADMIN') return res.status(403).json({ success: false, message: 'Cannot terminate Super Admin' });
+    if (user.role !== 'EMPLOYEE') return res.status(403).json({ success: false, message: 'Only employee accounts can be terminated here.' });
     if (user.orgId !== req.user.orgId) return res.status(403).json({ success: false, message: 'Access denied' });
 
     // SOFT DELETE — set status to TERMINATED (keeps all records for audit/history)
@@ -345,7 +408,9 @@ const resetDevice = async (req, res, next) => {
   try {
     const { userId } = req.params;
     // Tenant isolation: admins can only reset employees in their own org.
-    const where = req.user.role === 'SUPER_ADMIN' ? { id: userId } : { id: userId, orgId: req.user.orgId };
+    const where = req.user.role === 'SUPER_ADMIN'
+      ? { id: userId, role: 'EMPLOYEE' }
+      : { id: userId, orgId: req.user.orgId, role: 'EMPLOYEE' };
     const emp = await prisma.user.findFirst({ where, select: { id: true } });
     if (!emp) return res.status(404).json({ success: false, message: 'Employee not found' });
 
@@ -361,6 +426,27 @@ const resetDevice = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getManualAttendance = async (req, res, next) => {
+  try {
+    const data = await AttendanceService.getManualDashboard(req.user.orgId, req.query);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+};
+
+const manualCheckIn = async (req, res, next) => {
+  try {
+    const data = await AttendanceService.manualCheckIn(req.user.id, req.user.orgId, req.body);
+    res.status(201).json({ success: true, data });
+  } catch (err) { next(err); }
+};
+
+const manualCheckOut = async (req, res, next) => {
+  try {
+    const data = await AttendanceService.manualCheckOut(req.user.id, req.user.orgId, req.body);
+    res.json({ success: true, data });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getOrg, updateOrg,
   createOffice,
@@ -370,4 +456,5 @@ module.exports = {
   setBreakPolicy,
   emergencyStopAll, emergencyLockSystem, emergencyInvalidateQR, emergencyRevert,
   getNotifications, createEmployee,
+  getManualAttendance, manualCheckIn, manualCheckOut,
 };

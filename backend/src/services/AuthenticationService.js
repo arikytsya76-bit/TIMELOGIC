@@ -5,14 +5,14 @@ const { prisma } = require('../config/database');
 const { redis, PREFIXES } = require('../config/redis');
 const env = require('../config/env');
 const logger = require('../config/logger');
+const { getCurrentServerTime } = require('../utils/networkTime');
+const EmployeePolicy = require('./EmployeePolicyService');
 
 class AuthenticationService {
-  async login(identifier, password, deviceFingerprint = null) {
-    // Accept email OR employeeCode (e.g. "EMP001")
-    const isEmail = identifier.includes('@');
-    const user = isEmail
-      ? await prisma.user.findUnique({ where: { email: identifier } })
-      : await prisma.user.findUnique({ where: { employeeCode: identifier } });
+  async login(identifier, password, deviceFingerprint = null, context = {}) {
+    // Authentication uses email only; employee codes are organization-scoped display identifiers.
+    const normalizedIdentifier = String(identifier || '').trim();
+    const user = await prisma.user.findUnique({ where: { email: normalizedIdentifier.toLowerCase() } });
 
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
       throw Object.assign(new Error('Invalid credentials'), { status: 401 });
@@ -26,14 +26,25 @@ class AuthenticationService {
     // can only ever authenticate into their OWN org (orgId is fixed on the user
     // and carried in the JWT); they can never act inside another organization.
     const org = await prisma.organization.findUnique({
-      where: { id: user.orgId }, select: { id: true, name: true },
+      where: { id: user.orgId },
+      select: {
+        id: true, name: true, allowDeviceCheckIn: true, allowManualCheckIn: true,
+        hasStudents: true, openingTime: true, timezone: true,
+      },
     });
     if (!org) {
       throw Object.assign(new Error('Your organization is no longer active.'), { status: 403 });
     }
 
     // ── Device binding (employees only): one phone per employee, locked ──
-    if (deviceFingerprint && user.role === 'EMPLOYEE') {
+    if (user.role === 'EMPLOYEE') {
+      EmployeePolicy.assertChannelAllowed(org, user.checkInMethod, 'PHONE');
+      if (!deviceFingerprint) {
+        throw Object.assign(
+          new Error('A registered device is required for employee sign-in.'),
+          { status: 400, code: 'DEVICE_REQUIRED' }
+        );
+      }
       // 1. Is this phone already bound to a DIFFERENT employee?
       const boundElsewhere = await prisma.registeredDevice.findFirst({
         where: { deviceFingerprint, isActive: true, employeeId: { not: user.id } },
@@ -68,12 +79,15 @@ class AuthenticationService {
       }
     }
 
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    const loginAt = await getCurrentServerTime();
+    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: loginAt } });
 
-    // Admin accountability: record presence so the scheduler can mark the admin
-    // PRESENT/LATE for the day (same rule as employees).
+    let adminLogin = null;
     if (user.role === 'ADMIN') {
-      require('./AttendanceService').recordAdminPresence(user.id).catch(() => {});
+      adminLogin = await require('./AttendanceService').recordAdminLogin(user.id, loginAt, {
+        ipAddress: context.ipAddress,
+        userAgent: context.userAgent,
+      });
     }
 
     const accessToken = this._signAccess(user);
@@ -81,7 +95,8 @@ class AuthenticationService {
 
     return {
       accessToken, refreshToken,
-      user: { ...this._safeUser(user), organization: { id: org.id, name: org.name } },
+      user: { ...this._safeUser(user), lastLoginAt: loginAt, organization: org },
+      adminLogin,
     };
   }
 
@@ -99,15 +114,24 @@ class AuthenticationService {
     } catch {
       throw Object.assign(new Error('Invalid refresh token'), { status: 401 });
     }
-
     const stored = await prisma.refreshToken.findUnique({ where: { token: rawRefreshToken } });
-    if (!stored || stored.expiresAt < new Date()) {
+    if (
+      !stored ||
+      stored.expiresAt < new Date() ||
+      stored.userId !== payload.sub ||
+      stored.id !== payload.jti
+    ) {
       throw Object.assign(new Error('Refresh token expired or revoked'), { status: 401 });
     }
 
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || user.status !== 'ACTIVE') {
       throw Object.assign(new Error('User unavailable'), { status: 401 });
+    }
+
+    if (user.role === 'EMPLOYEE') {
+      const org = await EmployeePolicy.getOrganizationPolicy(user.orgId);
+      EmployeePolicy.assertChannelAllowed(org, user.checkInMethod, 'PHONE');
     }
 
     const accessToken = this._signAccess(user);
@@ -189,9 +213,15 @@ class AuthenticationService {
   }
 
   async _createRefreshToken(userId) {
-    const token = uuidv4();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await prisma.refreshToken.create({ data: { id: uuidv4(), userId, token, expiresAt } });
+    const id = uuidv4();
+    const token = jwt.sign(
+      { sub: userId, jti: id },
+      env.JWT_REFRESH_SECRET,
+      { expiresIn: env.JWT_REFRESH_EXPIRES_IN }
+    );
+    const decoded = jwt.decode(token);
+    const expiresAt = new Date(decoded.exp * 1000);
+    await prisma.refreshToken.create({ data: { id, userId, token, expiresAt } });
     return token;
   }
 

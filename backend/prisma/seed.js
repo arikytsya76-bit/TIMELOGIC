@@ -40,6 +40,10 @@ async function main() {
   const superAdmin = await prisma.user.upsert({
     where: { email: 'superadmin@acme.com' },
     update: {
+      orgId: platformOrg.id,
+      firstName: 'Super',
+      lastName: 'Admin',
+      employeeCode: 'SA001',
       passwordHash: hash,
       status: 'ACTIVE',
       role: 'SUPER_ADMIN',
@@ -57,6 +61,9 @@ async function main() {
     },
   });
 
+  // Re-seeding resets the development password, so revoke every old session.
+  await prisma.refreshToken.deleteMany({ where: { userId: superAdmin.id } });
+
   console.log('\n✓ Super Admin ready');
   console.log('─────────────────────────────────────────');
   console.log('  Web Panel  →  superadmin@acme.com');
@@ -71,5 +78,10 @@ async function main() {
 }
 
 main()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect());
+  .catch((error) => {
+    console.error('Database seed failed:', error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

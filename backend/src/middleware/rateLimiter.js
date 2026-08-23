@@ -15,6 +15,17 @@ const scanLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id || req.ip,
 });
 
+// Admin stations process many different people in quick succession. Limit
+// repeated attempts per subject instead of blocking the whole organization.
+const stationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Too many attempts for this person. Please wait a minute and try again.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => `${req.user?.id || req.ip}:${req.body?.employeeId || req.params?.studentId || 'station'}`,
+});
+
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
@@ -23,4 +34,4 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-module.exports = { authLimiter, scanLimiter, apiLimiter };
+module.exports = { authLimiter, scanLimiter, stationLimiter, apiLimiter };

@@ -39,6 +39,8 @@ router.get('/status', authenticate, ctrl.getStatus);
 
 router.get('/status/:employeeId', authenticate, isAdmin, ctrl.getStatus);
 
+router.get('/live', authenticate, isAdmin, ctrl.getLiveAttendance);
+
 // startDate / endDate are optional — controller defaults to last 30 days
 router.get('/history', authenticate, [
   query('startDate').optional().isISO8601(),

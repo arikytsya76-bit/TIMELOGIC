@@ -18,49 +18,49 @@ const createSession = async (req, res, next) => {
 
 const startSession = async (req, res, next) => {
   try {
-    const result = await SessionService.startSession(req.params.id);
+    const result = await SessionService.startSession(req.params.id, req.user.orgId);
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
 };
 
 const pauseSession = async (req, res, next) => {
   try {
-    const session = await SessionService.pauseSession(req.params.id);
+    const session = await SessionService.pauseSession(req.params.id, req.user.orgId);
     res.json({ success: true, data: session });
   } catch (err) { next(err); }
 };
 
 const resumeSession = async (req, res, next) => {
   try {
-    const result = await SessionService.resumeSession(req.params.id);
+    const result = await SessionService.resumeSession(req.params.id, req.user.orgId);
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
 };
 
 const endSession = async (req, res, next) => {
   try {
-    const session = await SessionService.endSession(req.params.id);
+    const session = await SessionService.endSession(req.params.id, req.user.orgId);
     res.json({ success: true, data: session });
   } catch (err) { next(err); }
 };
 
 const lockSession = async (req, res, next) => {
   try {
-    const session = await SessionService.lockSession(req.params.id);
+    const session = await SessionService.lockSession(req.params.id, req.user.orgId);
     res.json({ success: true, data: session });
   } catch (err) { next(err); }
 };
 
 const getLiveStatus = async (req, res, next) => {
   try {
-    const status = await SessionService.getLiveStatus(req.params.id);
+    const status = await SessionService.getLiveStatus(req.params.id, req.user.orgId);
     res.json({ success: true, data: status });
   } catch (err) { next(err); }
 };
 
 const forceRefreshQR = async (req, res, next) => {
   try {
-    const token = await SessionService.forceRefreshQR(req.params.id);
+    const token = await SessionService.forceRefreshQR(req.params.id, req.user.orgId);
     res.json({ success: true, data: token });
   } catch (err) { next(err); }
 };
@@ -76,7 +76,7 @@ const getActiveSessions = async (req, res, next) => {
 
 const getQRImage = async (req, res, next) => {
   try {
-    const { image, expiresIn } = await SessionService.getCurrentQRImage(req.params.id);
+    const { image, expiresIn } = await SessionService.getCurrentQRImage(req.params.id, req.user.orgId);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('X-QR-Expires-In', expiresIn);
     res.send(image);

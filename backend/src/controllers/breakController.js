@@ -1,5 +1,6 @@
 const BreakService = require('../services/BreakService');
 const { prisma } = require('../config/database');
+const { dayBounds } = require('../utils/attendanceClock');
 
 const startBreak = async (req, res, next) => {
   try {
@@ -29,21 +30,29 @@ const getDailyBreaks = async (req, res, next) => {
     const { date } = req.query;
 
     if (req.params.employeeId) {
+      const employee = await prisma.user.findFirst({
+        where: { id: req.params.employeeId, orgId: req.user.orgId, role: 'EMPLOYEE' }, select: { id: true },
+      });
+      if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
       // Specific employee — verify they belong to admin's org first
       const records = await BreakService.getDailyBreaks(req.params.employeeId, date);
-      return res.json({ success: true, data: records });
+      return res.json({ success: true, data: BreakService.withLifecycleStatus(records) });
     }
 
     // Admin requesting all employees' breaks for today → scope to their org
     if (req.user.role === 'ADMIN' || req.user.role === 'SUPER_ADMIN') {
-      const d = date ? new Date(date) : new Date();
-      d.setHours(0, 0, 0, 0);
-      const end = new Date(d); end.setHours(23, 59, 59, 999);
+      const organization = await prisma.organization.findUnique({
+        where: { id: req.user.orgId }, select: { timezone: true },
+      });
+      const requested = date && /^\d{4}-\d{2}-\d{2}$/.test(String(date))
+        ? new Date(`${date}T12:00:00.000Z`)
+        : date ? new Date(date) : new Date();
+      const bounds = dayBounds(requested, organization?.timezone || 'Africa/Lagos');
 
       const records = await prisma.breakRecord.findMany({
         where: {
           employee: { orgId: req.user.orgId },
-          startTime: { gte: d, lte: end },
+          startTime: { gte: bounds.start, lt: bounds.end },
         },
         include: {
           employee: {

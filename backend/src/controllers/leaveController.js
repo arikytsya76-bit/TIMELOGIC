@@ -59,7 +59,7 @@ const getMyLeaves = async (req, res, next) => {
       }),
       prisma.leaveRequest.count({ where: { employeeId: req.user.id, ...(status && { status }) } }),
     ]);
-    res.json({ success: true, data: leaves, total, page: +page, totalPages: Math.ceil(total / +limit) });
+    res.json({ success: true, data: await LeaveService.withLifecycleStatus(leaves), total, page: +page, totalPages: Math.ceil(total / +limit) });
   } catch (err) { next(err); }
 };
 

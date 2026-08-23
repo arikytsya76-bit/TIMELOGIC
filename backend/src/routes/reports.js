@@ -3,6 +3,7 @@ const ctrl = require('../controllers/reportController');
 const { authenticate } = require('../middleware/auth');
 const { isAdmin } = require('../middleware/roleGuard');
 
+router.get('/server-time', authenticate, isAdmin, ctrl.serverTime);
 router.get('/live-stats', authenticate, isAdmin, ctrl.liveStats);
 router.get('/daily', authenticate, isAdmin, ctrl.daily);
 router.get('/weekly', authenticate, isAdmin, ctrl.weekly);

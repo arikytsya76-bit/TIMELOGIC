@@ -27,7 +27,7 @@ Node.js + Express + Prisma backend for the Advanced Attendance System.
 
 ```bash
 # Docker one-liner (optional)
-docker run -d --name pg -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=attendance_db -p 5432:5432 postgres:16
+docker run -d --name timelogic-postgres -e POSTGRES_USER=timelogic -e POSTGRES_PASSWORD=timelogic -e POSTGRES_DB=timelogic -p 5432:5432 postgres:16
 docker run -d --name redis -p 6379:6379 redis:7
 ```
 
@@ -35,7 +35,7 @@ docker run -d --name redis -p 6379:6379 redis:7
 
 ```bash
 cd backend
-npm install
+npm ci
 ```
 
 ### 3. Configure
@@ -82,21 +82,32 @@ All endpoints return `{ success: boolean, data?: any, message?: string }`.
 | POST | `/refresh` | — | Get new access token |
 | GET | `/me` | ✓ | Current user profile |
 | PUT | `/change-password` | ✓ | Change password |
-| POST | `/devices` | ✓ | Register device |
-| DELETE | `/devices/:id` | ✓ | Deactivate device |
-| POST | `/users` | Admin | Create user |
 
 ### Attendance  `POST /api/attendance/...`
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/check-in` | Employee | Full check-in (QR + WiFi + Device + Selfie) |
+| POST | `/check-in/challenge` | Employee | Validate the active session/network and issue a one-time code |
+| POST | `/check-in` | Employee | Submit the code with device and Wi-Fi context |
 | POST | `/check-out` | Employee | Clock out |
 | GET | `/status` | Employee | Today's attendance status |
 | GET | `/history` | Employee | Historical records |
 | GET | `/flagged` | Admin | Flagged records |
 | PUT | `/records/:id/flag` | Admin | Flag a record |
 | PUT | `/records/:id/approve` | Admin | Approve a flagged record |
+
+### Admin station  `/api/admin/...`
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/attendance/login-status` | Admin | Database-backed first/latest Admin login for the current work day |
+| GET | `/manual-attendance` | Admin | Active sessions and employees allowed to use the manual station |
+| POST | `/manual-attendance/check-in` | Admin + employee password | Server-time employee check-in with normal lateness/penalties |
+| POST | `/manual-attendance/check-out` | Admin + employee password | Audited employee check-out |
+| GET | `/students` | Admin | Student station list when enabled by Super Admin |
+| POST | `/students` | Admin | Create a student |
+| POST | `/students/:id/check-in` | Admin | Unrestricted-time student check-in |
+| POST | `/students/:id/check-out` | Admin | Student check-out |
 
 ### Sessions  `/api/sessions`
 
@@ -117,6 +128,19 @@ All endpoints return `{ success: boolean, data?: any, message?: string }`.
 ### Fraud   `/api/fraud`
 ### Reports `/api/reports`
 ### Admin   `/api/admin`
+
+## Local feature verification
+
+Start the API first, then run this in another terminal:
+
+```bash
+npm run verify:local
+```
+
+It checks organization capability gates, Admin login persistence, employee
+PHONE/MANUAL authentication, server-owned attendance time, penalties, tenant
+isolation, student check-in/out, capability disabling, and overnight work-day
+handling. All created verification data is removed automatically.
 
 ---
 
@@ -151,20 +175,21 @@ socket.emit('session:join', sessionId);
 
 ```
 Mobile App
+  ├─► POST /api/attendance/check-in/challenge
+  │     body: { sessionId, wifiSSID, deviceId }
   └─► POST /api/attendance/check-in
-        body: { tokenValue, sessionId, deviceFingerprint,
-                wifiSSID, wifiBSSID, selfieImageUrl, ipAddress }
+        body: { sessionId, challengeCode, deviceId,
+                wifiSSID, platform, model }
 
 Server validates in order:
-  1. Session is ACTIVE
-  2. Device is registered (if deviceBindingRequired)
-  3. WiFi SSID/BSSID matches office fingerprint (if wifiRequired)
-  4. QR token is valid + not expired + not consumed (Redis fast-path)
-  5. Token consumed (single-use)
-  6. Selfie face-match ≥ threshold (if selfieRequired)
-  7. AttendanceRecord created → status PRESENT or LATE
-  8. FraudDetectionEngine.analyze() runs async
-  9. Real-time update emitted to admin dashboard
+  1. Employee and organization permit PHONE attendance
+  2. Session is ACTIVE and belongs to the employee's organization
+  3. Server time is inside the session start/end interval
+  4. One-time challenge is valid and unexpired
+  5. Registered device and office network rules pass
+  6. Server computes PRESENT/LATE and penalties from office opening rules
+  7. AttendanceRecord is created with source PHONE
+  8. Real-time update is emitted to the Admin dashboard
 ```
 
 ---
@@ -176,8 +201,10 @@ After running `npm run db:seed`:
 | Email | Password | Role |
 |-------|----------|------|
 | superadmin@acme.com | Admin@1234 | SUPER_ADMIN |
-| admin@acme.com | Admin@1234 | ADMIN |
-| employee@acme.com | Admin@1234 | EMPLOYEE |
+
+The seed intentionally creates only the platform Super Admin. Sign in to the
+web panel and create an organization to generate its first Admin account; that
+Admin can then create Employee accounts.
 
 ---
 

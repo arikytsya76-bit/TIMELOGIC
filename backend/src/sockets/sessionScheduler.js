@@ -4,21 +4,26 @@
  * organizations: each tick only touches offices whose threshold matches the
  * current minute, so most ticks do almost nothing.
  *
- *  openTime - AUTO_CREATE_LEAD (e.g. 07:50 for an 08:00 open)
+ *  openTime - AUTO_SESSION_LEAD_MIN
  *        → auto-create an ACTIVE session if the admin hasn't already.
+ *  openTime + office.lateAfterMinutes
+ *        → end the check-in session (no more check-ins; check-out still works).
  *  closeTime
- *        → end the session (no more check-ins; check-out still works).
+ *        → close the work day and allow the auto-checkout sweep to finish open records.
  *  closeTime + AUTO_CHECKOUT_LAG (e.g. 20:40 for a 20:00 close)
  *        → auto check-out anyone still clocked in.
  */
 
 const { prisma } = require('../config/database');
+const { redis, PREFIXES } = require('../config/redis');
 const { v4: uuidv4 } = require('uuid');
 const env = require('../config/env');
 const QRTokenService = require('../services/QRTokenService');
 const BreakService = require('../services/BreakService');
 const AttendanceService = require('../services/AttendanceService');
 const logger = require('../config/logger');
+const { atZonedTime, openingOccurrence, zonedParts, isSunday } = require('../utils/attendanceClock');
+const { getCurrentServerTime } = require('../utils/networkTime');
 
 let _timer = null;
 let _lastMinute = -1;
@@ -29,73 +34,82 @@ function toMinutes(hhmm) {
   if (Number.isNaN(h) || Number.isNaN(m)) return null;
   return h * 60 + m;
 }
-function atTime(base, hhmm) {
-  const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
-  const d = new Date(base); d.setHours(h, m, 0, 0); return d;
-}
-
 async function tick() {
   try {
-    const now      = new Date();
-    const minOfDay = now.getHours() * 60 + now.getMinutes();
-    if (minOfDay === _lastMinute) return; // once per minute
-    _lastMinute = minOfDay;
+    const now = await getCurrentServerTime();
+    const minuteKey = Math.floor(now.getTime() / 60000);
+    if (minuteKey === _lastMinute) return; // once per absolute minute
+    _lastMinute = minuteKey;
+
+    // Reconcile missed work after a restart, laptop sleep, or delayed timer.
+    await endExpiredSessions(now);
+    await endSessionsAfterCheckInWindow(now);
+    await endSessionsOutsideOfficeHours(now);
+    await autoCheckoutExpired(now);
 
     const orgs = await prisma.organization.findMany({
       where: { id: { not: 'platform-org' } },
-      include: { offices: { where: { isActive: true } } },
+      include: { offices: { where: { isActive: true }, orderBy: { createdAt: 'asc' } } },
     });
 
     for (const org of orgs) {
       for (const office of org.offices) {
+        const local = zonedParts(now, office.timezone);
+        if (isSunday(now, office.timezone)) continue;
+        const minOfDay = local.hour * 60 + local.minute;
         const openMin  = toMinutes(office.openTime);
         const closeMin = toMinutes(office.closeTime);
         if (openMin == null || closeMin == null) continue;
 
-        const autoCreateMin  = openMin - env.AUTO_CREATE_LEAD_MIN;
-        const autoCheckoutMin = closeMin + env.AUTO_CHECKOUT_LAG_MIN;
-
-        if (minOfDay === autoCreateMin)   await autoCreate(org, office, now);
-        if (minOfDay === closeMin)        await endOfficeSessions(org, office, now);
-        if (minOfDay === autoCheckoutMin) await autoCheckout(org, office, now);
+        let openAt = atZonedTime(now, office.openTime, office.timezone);
+        let closeAt = atZonedTime(now, office.closeTime, office.timezone);
+        if (closeMin <= openMin) {
+          if (minOfDay < closeMin) openAt = atZonedTime(now, office.openTime, office.timezone, -1);
+          else closeAt = atZonedTime(now, office.closeTime, office.timezone, 1);
+        }
+        const autoCreateAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+        if (now >= autoCreateAt && now < closeAt) await autoCreate(org, office, now, openAt, closeAt);
       }
 
-      // Mark the org's admins PRESENT/LATE once per day, at the PRIMARY office's
-      // openTime - lead (same instant the session is guaranteed to exist).
-      const primary = org.offices[0];
-      const pOpen = primary ? toMinutes(primary.openTime) : null;
-      if (pOpen != null && minOfDay === pOpen - env.AUTO_CREATE_LEAD_MIN) {
-        const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
-        const session = await prisma.attendanceSession.findFirst({
-          where: { officeId: primary.id, startTime: { gte: dayStart }, status: { in: ['ACTIVE', 'PAUSED'] } },
-          select: { id: true },
-        });
-        await AttendanceService.markAdminAttendance(org, primary, session, now).catch((e) => logger.warn('admin attendance:', e.message));
-      }
     }
 
     // Force-end any break that overstayed its department window (raises fraud).
     await BreakService.autoEndOverdueBreaks().catch((e) => logger.warn('break sweep:', e.message));
   } catch (err) {
-    logger.warn('Session scheduler tick error:', err.message);
+    logger.warn(`Session scheduler tick error: ${err.stack || err.message}`);
   }
 }
 
-// Auto-create a session at openTime - lead, ONLY if none exists yet today.
-async function autoCreate(org, office, now) {
-  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+// Auto-create the employee session at the office opening time.
+async function autoCreate(org, office, now, openAt, closeAt) {
+  const lockKey = `${PREFIXES.SESSION_AUTO_LOCK}${office.id}:${openAt.toISOString()}`;
+  const lockToken = uuidv4();
+  const lockAcquired = await redis.set(lockKey, lockToken, 'EX', 90, 'NX').catch(() => null);
+  if (lockAcquired !== 'OK') return;
+
+  try {
   const existing = await prisma.attendanceSession.findFirst({
-    where: { officeId: office.id, startTime: { gte: dayStart }, status: { in: ['ACTIVE', 'SCHEDULED', 'PAUSED'] } },
+    where: {
+      officeId: office.id,
+      // Do not recreate an ended session after its check-in window expires.
+      // The stored endTime remains the office close so open records can still
+      // be checked out until closing/automatic checkout.
+      startTime: { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000), lt: closeAt },
+    },
     select: { id: true },
   });
-  if (existing) return; // admin already created one — do not auto-create
+  if (existing) {
+    await AttendanceService.syncAdminAttendanceForSession(existing.id);
+    return;
+  }
 
   const admin = await prisma.user.findFirst({
     where: { orgId: org.id, role: 'ADMIN', status: 'ACTIVE' }, select: { id: true },
   });
 
-  const startTime = new Date(now);                       // openTime - lead
-  const endTime   = atTime(now, office.closeTime || '17:00');
+  const startTime = new Date((openAt || now).getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+  let endTime = closeAt || atZonedTime(now, office.closeTime || '17:00', office.timezone);
+  if (endTime <= startTime) endTime = atZonedTime(now, office.closeTime || '17:00', office.timezone, 1);
   if (endTime <= startTime) return;
 
   const session = await prisma.attendanceSession.create({
@@ -113,48 +127,131 @@ async function autoCreate(org, office, now) {
   });
   await QRTokenService.generate(session);
   await QRTokenService.scheduleRotation(session);
+  await AttendanceService.syncAdminAttendanceForSession(session.id);
   logger.info(`Scheduler: auto-created session for ${org.name}/${office.name} (open ${office.openTime})`);
+  } finally {
+    await redis.eval(
+      "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+      1, lockKey, lockToken,
+    ).catch(() => {});
+  }
 }
 
-// End the office's active sessions at closeTime (stops further check-ins).
-async function endOfficeSessions(org, office, now) {
-  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+async function endExpiredSessions(now) {
   const sessions = await prisma.attendanceSession.findMany({
-    where: { officeId: office.id, startTime: { gte: dayStart }, status: { in: ['ACTIVE', 'PAUSED'] } },
+    where: { endTime: { lte: now }, status: { in: ['ACTIVE', 'PAUSED'] } },
     select: { id: true, sessionName: true },
   });
   for (const sn of sessions) {
-    await prisma.attendanceSession.update({ where: { id: sn.id }, data: { status: 'ENDED' } });
+    await prisma.attendanceSession.updateMany({
+      where: { id: sn.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+      data: { status: 'ENDED' },
+    });
     await QRTokenService.invalidatePrevious(sn.id).catch(() => {});
-    logger.info(`Scheduler: ended session ${sn.sessionName} for ${org.name}/${office.name} at ${office.closeTime}`);
+    logger.info(`Scheduler: ended expired session ${sn.sessionName}`);
   }
 }
 
-// Auto check-out anyone still clocked in, closeTime + lag.
-async function autoCheckout(org, office, now) {
-  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+async function endSessionsAfterCheckInWindow(now) {
+  const sessions = await prisma.attendanceSession.findMany({
+    where: { status: { in: ['ACTIVE', 'PAUSED'] }, startTime: { lte: now } },
+    select: {
+      id: true, sessionName: true, startTime: true, endTime: true,
+      office: { select: { openTime: true, closeTime: true, timezone: true, lateAfterMinutes: true } },
+    },
+  });
+
+  for (const session of sessions) {
+    const opening = session.office?.openTime
+      ? openingOccurrence(session.startTime, session.office.openTime, session.office.timezone, session.office.closeTime, session.startTime)
+      : session.startTime;
+    const configuredLateAfter = Number(session.office?.lateAfterMinutes);
+    const lateAfter = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
+    const checkInDeadline = new Date(opening.getTime() + Math.max(0, lateAfter) * 60_000);
+    if (now < checkInDeadline || (session.endTime && now >= session.endTime)) continue;
+    const changed = await prisma.attendanceSession.updateMany({
+      where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+      data: { status: 'ENDED' },
+    });
+    if (changed.count) {
+      await QRTokenService.invalidatePrevious(session.id).catch(() => {});
+      logger.info(`Scheduler: closed check-in window for ${session.sessionName}`);
+    }
+  }
+}
+
+async function endSessionsOutsideOfficeHours(now) {
+  const sessions = await prisma.attendanceSession.findMany({
+    where: { status: { in: ['ACTIVE', 'PAUSED'] } },
+    select: {
+      id: true, sessionName: true,
+      office: { select: { openTime: true, closeTime: true, timezone: true } },
+    },
+  });
+
+  for (const session of sessions) {
+    const openMin = toMinutes(session.office?.openTime);
+    const closeMin = toMinutes(session.office?.closeTime);
+    if (openMin == null || closeMin == null) continue;
+
+    const local = zonedParts(now, session.office.timezone);
+    if (isSunday(now, session.office.timezone)) {
+      await prisma.attendanceSession.updateMany({
+        where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+        data: { status: 'ENDED' },
+      });
+      await QRTokenService.invalidatePrevious(session.id).catch(() => {});
+      logger.info(`Scheduler: ended Sunday session ${session.sessionName}`);
+      continue;
+    }
+    const localMin = local.hour * 60 + local.minute;
+    let openAt = atZonedTime(now, session.office.openTime, session.office.timezone);
+    let closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone);
+    if (closeMin <= openMin) {
+      if (localMin < closeMin) {
+        openAt = atZonedTime(now, session.office.openTime, session.office.timezone, -1);
+      } else {
+        closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone, 1);
+      }
+    }
+
+    const autoCreateAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+    if (now < autoCreateAt || now >= closeAt) {
+      await prisma.attendanceSession.updateMany({
+        where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
+        data: { status: 'ENDED' },
+      });
+      await QRTokenService.invalidatePrevious(session.id).catch(() => {});
+      logger.info(`Scheduler: ended session outside office hours ${session.sessionName}`);
+    }
+  }
+}
+
+async function autoCheckoutExpired(now) {
+  const cutoff = new Date(now.getTime() - env.AUTO_CHECKOUT_LAG_MIN * 60000);
   const open = await prisma.attendanceRecord.findMany({
     where: {
-      date: dayStart,
       clockInTime: { not: null },
       clockOutTime: null,
-      session: { officeId: office.id },
+      session: { endTime: { lte: cutoff } },
     },
-    select: { id: true, clockInTime: true },
+    select: { id: true, clockInTime: true, session: { select: { endTime: true } } },
   });
   for (const r of open) {
-    const clockOutTime = new Date(now);
+    const scheduledCheckout = new Date(r.session.endTime.getTime() + env.AUTO_CHECKOUT_LAG_MIN * 60000);
+    const clockOutTime = scheduledCheckout > r.clockInTime ? scheduledCheckout : new Date(r.clockInTime);
     const workMs = clockOutTime - r.clockInTime;
-    await prisma.attendanceRecord.update({
-      where: { id: r.id },
-      data: { clockOutTime, totalWorkHours: parseFloat((workMs / 3600000).toFixed(2)) },
+    await prisma.attendanceRecord.updateMany({
+      where: { id: r.id, clockOutTime: null },
+      data: { clockOutTime, totalWorkHours: parseFloat((workMs / 3600000).toFixed(2)), checkOutSource: 'SYSTEM' },
     });
   }
-  if (open.length) logger.info(`Scheduler: auto-checked-out ${open.length} for ${org.name}/${office.name}`);
+  if (open.length) logger.info(`Scheduler: auto-checked-out ${open.length} expired attendance record(s)`);
 }
 
 function startSessionScheduler() {
   if (_timer) return;
+  void tick();
   _timer = setInterval(tick, 30_000);
   logger.info('Session scheduler started (per-office, multi-org)');
 }

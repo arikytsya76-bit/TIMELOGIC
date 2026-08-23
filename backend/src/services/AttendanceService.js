@@ -1,8 +1,12 @@
 const { v4: uuidv4 } = require('uuid');
+const bcrypt = require('bcryptjs');
 const { prisma } = require('../config/database');
 const { redis, PREFIXES } = require('../config/redis');
 const env = require('../config/env');
 const logger = require('../config/logger');
+const EmployeePolicy = require('./EmployeePolicyService');
+const { dateOnly, evaluateAttendance, attendanceDate, isSunday, openingOccurrence, atZonedTime } = require('../utils/attendanceClock');
+const { getCurrentServerTime } = require('../utils/networkTime');
 
 const CHALLENGE_TTL_SECONDS = 120; // code valid for 2 minutes
 
@@ -12,16 +16,33 @@ class AttendanceService {
   // code the employee must type back. If they're on the wrong network, no code is
   // issued — they're told to connect to the company Wi-Fi instead.
   async issueChallenge(employeeId, sessionId, ctx = {}) {
+    const employee = await this._loadEmployeeForChannel(employeeId, 'PHONE');
     // Session must exist and be active to issue a challenge
     const session = await prisma.attendanceSession.findUnique({
       where: { id: sessionId },
       select: {
-        id: true, status: true,
-        office: { select: { id: true, wifiSSID: true, publicIp: true, securitySettings: true } },
+        id: true, status: true, startTime: true, endTime: true,
+        office: { select: { id: true, orgId: true, isActive: true, wifiSSID: true, publicIp: true, securitySettings: true } },
       },
     });
-    if (!session || session.status !== 'ACTIVE') {
+    const challengeTime = await getCurrentServerTime();
+    if (isSunday(challengeTime, session?.office?.timezone)) {
+      return { success: false, reason: 'SUNDAY_CLOSED', message: 'Attendance is not recorded on Sundays.' };
+    }
+    if (
+      !session || session.status !== 'ACTIVE' || !session.office?.isActive ||
+      challengeTime < session.startTime || (session.endTime && challengeTime > session.endTime)
+    ) {
       return { success: false, reason: 'SESSION_CLOSED', message: 'No active attendance session. Ask your admin to start a session.' };
+    }
+    if (session.office.orgId !== employee.orgId) {
+      return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
+    }
+    if (this._isBeforeOpening(challengeTime, session)) {
+      return { success: false, reason: 'SESSION_CLOSED', message: 'Check-in opens at the organisation opening time.' };
+    }
+    if (this._isAfterCheckInDeadline(challengeTime, session)) {
+      return { success: false, reason: 'CHECKIN_CLOSED', message: 'The check-in window has closed for today.' };
     }
 
     // Gate: must be on the company Wi-Fi BEFORE we reveal a code
@@ -121,39 +142,147 @@ class AttendanceService {
   }
 
   // ── ADMIN ATTENDANCE (anti-cheat) ───────────────────────────────────────────
-  // An admin must be present (logged in / app open) by openTime - AUTO_CREATE_LEAD,
-  // the same instant the scheduler auto-opens the session. We record the FIRST
-  // presence of the day in Redis; the scheduler then writes a PRESENT/LATE record.
-  async recordAdminPresence(adminId) {
+  // Every explicit admin login is stored. The first login of the organization’s
+  // local day is authoritative for attendance and uses the same opening-time,
+  // grace, late, and penalty rules as employee attendance.
+  async recordAdminLogin(adminId, loginAt = null, context = {}) {
+    loginAt = loginAt ?? await getCurrentServerTime();
+    const admin = await prisma.user.findUnique({
+      where: { id: adminId },
+      select: {
+        id: true, orgId: true, role: true, status: true,
+        organization: {
+          select: {
+            id: true, openingTime: true, timezone: true,
+            offices: {
+              where: { isActive: true }, orderBy: { createdAt: 'asc' }, take: 1,
+              select: { id: true, closeTime: true, graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true },
+            },
+          },
+        },
+      },
+    });
+    if (!admin || admin.role !== 'ADMIN' || admin.status !== 'ACTIVE') return null;
+
+    if (isSunday(loginAt, admin.organization.timezone)) return null;
+
+    const officeRules = admin.organization.offices[0] ?? {};
+    const evaluation = evaluateAttendance(loginAt, {
+      ...officeRules,
+      openTime: admin.organization.openingTime,
+      timezone: admin.organization.timezone,
+      graceMinutes: 20,
+      lateAfterMinutes: 20,
+    });
+    const event = await prisma.adminLoginEvent.create({
+      data: {
+        id: uuidv4(), adminId, orgId: admin.orgId, loggedInAt: loginAt,
+        attendanceStatus: evaluation.status,
+        minutesLate: evaluation.minutesLate,
+        penalty: evaluation.penalty,
+        ipAddress: context.ipAddress || null,
+        userAgent: context.userAgent ? String(context.userAgent).slice(0, 500) : null,
+      },
+    });
+
     try {
-      const key = `${PREFIXES.ADMIN_PRESENT}${adminId}`;
-      const ok = await redis.set(key, String(Date.now()), 'NX'); // first presence wins
-      if (ok) {
-        const eod = new Date(); eod.setHours(23, 59, 59, 999);
-        await redis.pexpireat(key, eod.getTime()).catch(() => {});
-      }
-    } catch (_) { /* best-effort */ }
+      await redis.set(`${PREFIXES.ADMIN_PRESENT}${adminId}`, String(loginAt.getTime()), 'NX', 'EX', 86400);
+    } catch (_) { /* optional cache; the database event is authoritative */ }
+
+    const activeSession = officeRules.id ? await prisma.attendanceSession.findFirst({
+      where: {
+        officeId: officeRules.id,
+        status: 'ACTIVE',
+        startTime: { lte: loginAt },
+        OR: [{ endTime: null }, { endTime: { gt: loginAt } }],
+      },
+      orderBy: { startTime: 'desc' },
+      select: { id: true },
+    }) : null;
+    if (activeSession) await this.syncAdminAttendanceForSession(activeSession.id, adminId);
+
+    return {
+      loggedInAt: event.loggedInAt,
+      status: event.attendanceStatus,
+      minutesLate: event.minutesLate,
+      penalty: event.penalty,
+      openingTime: admin.organization.openingTime,
+      timezone: admin.organization.timezone,
+      sessionId: activeSession?.id ?? null,
+    };
   }
 
-  // Called by the scheduler at openTime - lead. Marks every active admin of the org
-  // PRESENT (present by the threshold) or LATE (not present), like an employee.
-  async markAdminAttendance(org, office, session, now) {
-    if (!session) return;
-    const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  async syncAdminAttendanceForSession(sessionId, onlyAdminId = null) {
+    const session = await prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        startTime: true,
+        endTime: true,
+        office: { select: { id: true, orgId: true, timezone: true, openTime: true, closeTime: true } },
+      },
+    });
+    if (!session?.office) return;
+    const timezone = session.office.timezone || 'Africa/Lagos';
+    const workPolicy = {
+      openTime: session.office.openTime,
+      closeTime: session.office.closeTime,
+      timezone,
+    };
+    const recordDate = attendanceDate(session.startTime, {
+      ...workPolicy,
+      openingReference: session.startTime,
+    });
+    const now = await getCurrentServerTime();
+    if (isSunday(session.startTime, timezone)) return;
+    const candidateStart = new Date(session.startTime.getTime() - 24 * 60 * 60 * 1000);
+    const candidateEnd = new Date((session.endTime || session.startTime).getTime() + 24 * 60 * 60 * 1000);
     const admins = await prisma.user.findMany({
-      where: { orgId: org.id, role: 'ADMIN', status: 'ACTIVE' },
+      where: {
+        orgId: session.office.orgId, role: 'ADMIN', status: 'ACTIVE',
+        ...(onlyAdminId ? { id: onlyAdminId } : {}),
+      },
       select: { id: true },
     });
-    for (const a of admins) {
-      let presentAt = null;
-      try { presentAt = await redis.get(`${PREFIXES.ADMIN_PRESENT}${a.id}`); } catch (_) {}
-      const status = presentAt ? 'PRESENT' : 'LATE';
-      const clockInTime = presentAt ? new Date(Number(presentAt)) : null;
+
+    for (const admin of admins) {
+      const loginCandidates = await prisma.adminLoginEvent.findMany({
+        where: { adminId: admin.id, loggedInAt: { gte: candidateStart, lt: candidateEnd } },
+        orderBy: { loggedInAt: 'asc' },
+      });
+      const firstLogin = loginCandidates.find((event) => (
+        attendanceDate(event.loggedInAt, workPolicy).getTime() === recordDate.getTime()
+      ));
+      if (!firstLogin) {
+        const opening = openingOccurrence(now, workPolicy.openTime, timezone, workPolicy.closeTime, session.startTime);
+        const lateCutoff = opening ? new Date(opening.getTime() + 20 * 60000) : null;
+        if (!lateCutoff || now < lateCutoff) continue;
+        await prisma.attendanceRecord.upsert({
+          where: { employeeId_sessionId_date: { employeeId: admin.id, sessionId, date: recordDate } },
+          create: {
+            id: uuidv4(), employeeId: admin.id, sessionId, date: recordDate,
+            status: 'LATE', checkInSource: 'ADMIN_LOGIN', penalty: 0,
+          },
+          update: {},
+        });
+        continue;
+      }
       await prisma.attendanceRecord.upsert({
-        where: { employeeId_sessionId_date: { employeeId: a.id, sessionId: session.id, date: dayStart } },
-        create: { id: uuidv4(), employeeId: a.id, sessionId: session.id, date: dayStart, status, clockInTime },
-        update: {}, // first write wins; don't overwrite a later state
-      }).catch(() => {});
+        where: { employeeId_sessionId_date: { employeeId: admin.id, sessionId, date: recordDate } },
+        create: {
+          id: uuidv4(), employeeId: admin.id, sessionId, date: recordDate,
+          clockInTime: firstLogin.loggedInAt,
+          status: firstLogin.attendanceStatus,
+          penalty: firstLogin.penalty,
+          checkInSource: 'ADMIN_LOGIN',
+        },
+        update: {
+          clockInTime: firstLogin.loggedInAt,
+          status: firstLogin.attendanceStatus,
+          penalty: firstLogin.penalty,
+          checkInSource: 'ADMIN_LOGIN',
+        },
+      });
     }
   }
 
@@ -162,9 +291,9 @@ class AttendanceService {
   // live presence, and when someone on break returns to the office Wi-Fi it ends
   // the break automatically (the overstay sweep handles those who never return).
   async recordHeartbeat(employeeId, wifiSSID) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
     const record = await prisma.attendanceRecord.findFirst({
-      where: { employeeId, date: today, clockInTime: { not: null }, clockOutTime: null },
+      where: { employeeId, clockInTime: { not: null }, clockOutTime: null },
+      orderBy: { clockInTime: 'desc' },
       include: { session: { select: { id: true, office: { select: { wifiSSID: true } } } } },
     });
     if (!record) return { tracked: false, onWifi: null }; // not clocked in / already out
@@ -216,6 +345,8 @@ class AttendanceService {
   // ── CHECK IN ────────────────────────────────────────────────────────────────
   async checkIn(employeeId, scanData) {
     const { sessionId, deviceId, wifiSSID, challengeCode, platform, model, ip } = scanData;
+    const employee = await this._loadEmployeeForChannel(employeeId, 'PHONE');
+    const clockInTime = await getCurrentServerTime();
 
     // Load session + office + security settings in one query
     const session = await prisma.attendanceSession.findUnique({
@@ -224,7 +355,8 @@ class AttendanceService {
         id: true, status: true, startTime: true, endTime: true,
         office: {
           select: {
-            id: true, name: true, wifiSSID: true, publicIp: true, openTime: true,
+            id: true, orgId: true, name: true, isActive: true, timezone: true,
+            wifiSSID: true, publicIp: true, openTime: true, closeTime: true,
             graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
             securitySettings: true,
           },
@@ -232,28 +364,27 @@ class AttendanceService {
       },
     });
 
-    if (!session || session.status !== 'ACTIVE') {
+    if (
+      !session || session.status !== 'ACTIVE' || !session.office?.isActive ||
+      clockInTime < session.startTime || (session.endTime && clockInTime > session.endTime)
+    ) {
       return { success: false, reason: 'SESSION_CLOSED' };
+    }
+    if (isSunday(clockInTime, session.office.timezone)) {
+      return { success: false, reason: 'SUNDAY_CLOSED', message: 'Attendance is not recorded on Sundays.' };
+    }
+    if (session.office.orgId !== employee.orgId) {
+      return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
+    }
+    if (this._isBeforeOpening(clockInTime, session)) {
+      return { success: false, reason: 'SESSION_CLOSED', message: 'Check-in opens at the organisation opening time.' };
+    }
+    if (this._isAfterCheckInDeadline(clockInTime, session)) {
+      return { success: false, reason: 'CHECKIN_CLOSED', message: 'The check-in window has closed for today.' };
     }
 
     // ── Check-in window: open for CHECKIN_WINDOW_MIN after the session start ──
-    const minsSinceStart = (Date.now() - session.startTime.getTime()) / 60000;
-    if (minsSinceStart > env.CHECKIN_WINDOW_MIN) {
-      return {
-        success: false, reason: 'CHECKIN_CLOSED',
-        message: `Check-in closed. The window was open for ${env.CHECKIN_WINDOW_MIN} minutes after the session started. You are marked absent for today.`,
-      };
-    }
-
     // Prevent duplicate check-in on same session/day
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const existing = await prisma.attendanceRecord.findFirst({
-      where: { employeeId, sessionId, date: today },
-    });
-    if (existing?.clockInTime) {
-      throw Object.assign(new Error('Already clocked in for this session today'), { status: 409 });
-    }
-
     // ── STEP 0: Time-based challenge (anti-automation) ──
     const challenge = await this._verifyChallenge(employeeId, sessionId, challengeCode);
     if (!challenge.ok) {
@@ -277,46 +408,47 @@ class AttendanceService {
     // IS the office's. We store it so iOS/web (PWA) employees on the same Wi-Fi
     // can be verified by IP. Self-healing: tracks dynamic IP changes daily.
     await this._learnOfficeIp(session.office, ctx);
-
     // ── Attendance rules: status + penalty ──
-    const clockInTime = new Date();
     const { status, penalty } = this._computeStatusAndPenalty(clockInTime, session);
+    const today = attendanceDate(clockInTime, {
+      ...session.office,
+      openingReference: session.startTime,
+    });
 
     // ── Persist the record ──
-    const record = await prisma.attendanceRecord.upsert({
-      where: { employeeId_sessionId_date: { employeeId, sessionId, date: today } },
-      create: {
-        id: uuidv4(), employeeId, sessionId, date: today, clockInTime,
-        status, scanResult: 'VALID',
-        wifiVerified: check.wifiVerified, deviceVerified: check.deviceVerified,
-        deviceId: deviceId ?? null, wifiSSID: wifiSSID ?? null, penalty,
-      },
-      update: {
-        clockInTime, status, scanResult: 'VALID',
-        wifiVerified: check.wifiVerified, deviceVerified: check.deviceVerified,
-        deviceId: deviceId ?? null, wifiSSID: wifiSSID ?? null, penalty,
-      },
+    const record = await this._persistCheckIn({
+      employeeId, sessionId, date: today, clockInTime, status, penalty,
+      checkInSource: 'PHONE', scanResult: 'VALID',
+      wifiVerified: check.wifiVerified, deviceVerified: check.deviceVerified,
+      deviceId: deviceId ?? null, wifiSSID: wifiSSID ?? null,
     });
 
     this._emit('attendance:checkin', { record, sessionId });
-    return { success: true, record, status, penalty, clockInTime };
+    return { success: true, record, status, penalty, clockInTime, timezone: session.office.timezone || 'Africa/Lagos' };
   }
 
   // ── CHECK OUT ─────────────────────────────────────────────────────────────────
   async checkOut(employeeId, sessionId, ctx = {}) {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const employee = await this._loadEmployeeForChannel(employeeId, 'PHONE');
 
     // Resolve the record (sessionId optional)
     const record = await prisma.attendanceRecord.findFirst({
-      where: { employeeId, ...(sessionId ? { sessionId } : {}), date: today },
+      where: {
+        employeeId,
+        ...(sessionId ? { sessionId } : {}),
+        clockInTime: { not: null },
+        clockOutTime: null,
+      },
       orderBy: { clockInTime: 'desc' },
       include: {
         session: {
           select: {
             id: true,
+            startTime: true,
             office: {
               select: {
-                id: true, name: true, wifiSSID: true, publicIp: true,
+                id: true, orgId: true, name: true, wifiSSID: true, publicIp: true,
+                openTime: true, closeTime: true, timezone: true,
                 securitySettings: true,
               },
             },
@@ -327,6 +459,13 @@ class AttendanceService {
 
     if (!record) throw Object.assign(new Error('No check-in record found for today'), { status: 404 });
     if (record.clockOutTime) throw Object.assign(new Error('Already clocked out'), { status: 409 });
+    if (record.session.office?.orgId !== employee.orgId) {
+      throw Object.assign(new Error('Attendance record not found.'), { status: 404 });
+    }
+
+    const clockOutTime = await getCurrentServerTime();
+    const office = record.session.office;
+    this._assertCheckoutAllowed(record, clockOutTime);
 
     // ── Same device / wifi / geo enforcement on the way out ──
     const check = await this._verifyContext({
@@ -341,17 +480,330 @@ class AttendanceService {
       throw err;
     }
 
-    const clockOutTime = new Date();
     const workMs = clockOutTime - record.clockInTime;
     const totalWorkHours = parseFloat((workMs / 3600000).toFixed(2));
 
-    const updated = await prisma.attendanceRecord.update({
+    const changed = await prisma.attendanceRecord.updateMany({
+      where: { id: record.id, clockOutTime: null },
+      data: { clockOutTime, totalWorkHours, checkOutSource: 'PHONE' },
+    });
+    if (!changed.count) throw Object.assign(new Error('Already clocked out'), { status: 409 });
+    const updated = await prisma.attendanceRecord.findUnique({
       where: { id: record.id },
-      data: { clockOutTime, totalWorkHours },
+      include: { session: { select: { office: { select: { timezone: true } } } } },
     });
 
     this._emit('attendance:checkout', { record: updated, sessionId: record.sessionId });
     return updated;
+  }
+
+  async getManualDashboard(adminOrgId, { sessionId, search = '', page = 1, limit = 100 } = {}) {
+    const organization = await EmployeePolicy.getOrganizationPolicy(adminOrgId);
+    const now = await getCurrentServerTime();
+    const activeSessions = await prisma.attendanceSession.findMany({
+      where: {
+        office: { orgId: adminOrgId, isActive: true },
+        status: 'ACTIVE',
+        startTime: { lte: now },
+        OR: [{ endTime: null }, { endTime: { gt: now } }],
+      },
+      select: {
+        id: true, sessionName: true, startTime: true, endTime: true,
+        office: {
+          select: {
+            id: true, name: true, timezone: true, openTime: true, closeTime: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+          },
+        },
+      },
+      orderBy: { startTime: 'desc' },
+    });
+    const selectedSession = sessionId
+      ? activeSessions.find((session) => session.id === sessionId)
+      : activeSessions[0];
+    if (sessionId && !selectedSession) {
+      throw Object.assign(new Error('Active session not found for this organization.'), { status: 404 });
+    }
+
+    if (!organization.allowManualCheckIn) {
+      return {
+        enabled: false, serverTime: now, organization,
+        activeSessions, selectedSession: selectedSession ?? null,
+        employees: [], total: 0, page: 1, totalPages: 0,
+      };
+    }
+
+    const safePage = Math.max(1, Number(page) || 1);
+    const safeLimit = Math.min(200, Math.max(1, Number(limit) || 100));
+    const where = {
+      orgId: adminOrgId,
+      role: 'EMPLOYEE',
+      status: 'ACTIVE',
+      checkInMethod: { in: ['MANUAL', 'BOTH'] },
+      ...(search ? {
+        OR: [
+          { firstName: { contains: search, mode: 'insensitive' } },
+          { lastName: { contains: search, mode: 'insensitive' } },
+          { employeeCode: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      } : {}),
+    };
+    const recordDate = selectedSession ? attendanceDate(now, {
+      ...selectedSession.office,
+      openingReference: selectedSession.startTime,
+    }) : null;
+    const [employees, total] = await Promise.all([
+      prisma.user.findMany({
+        where,
+        select: {
+          id: true, firstName: true, lastName: true, employeeCode: true,
+          email: true, checkInMethod: true, phone: true,
+          department: { select: { name: true } },
+          attendanceRecords: selectedSession ? {
+            where: { sessionId: selectedSession.id, date: recordDate },
+            take: 1,
+            select: {
+              id: true, sessionId: true, clockInTime: true, clockOutTime: true, status: true,
+              penalty: true, checkInSource: true, checkOutSource: true,
+              checkInRecorder: { select: { id: true, firstName: true, lastName: true } },
+              checkOutRecorder: { select: { id: true, firstName: true, lastName: true } },
+              session: { select: { office: { select: { name: true, timezone: true } } } },
+            },
+          } : false,
+        },
+        orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+      }),
+      prisma.user.count({ where }),
+    ]);
+    const openRecords = employees.length ? await prisma.attendanceRecord.findMany({
+      where: {
+        employeeId: { in: employees.map((employee) => employee.id) },
+        clockInTime: { not: null },
+        clockOutTime: null,
+        session: { office: { orgId: adminOrgId } },
+      },
+      orderBy: { clockInTime: 'desc' },
+      select: {
+        id: true, employeeId: true, sessionId: true,
+        clockInTime: true, clockOutTime: true, status: true, penalty: true,
+        checkInSource: true, checkOutSource: true,
+        checkInRecorder: { select: { id: true, firstName: true, lastName: true } },
+        checkOutRecorder: { select: { id: true, firstName: true, lastName: true } },
+        session: { select: { office: { select: { name: true, timezone: true } } } },
+      },
+    }) : [];
+    const openByEmployee = new Map();
+    for (const record of openRecords) {
+      if (!openByEmployee.has(record.employeeId)) openByEmployee.set(record.employeeId, record);
+    }
+    return {
+      enabled: true, serverTime: now, organization,
+      activeSessions, selectedSession: selectedSession ?? null,
+      employees: employees.map((employee) => ({
+        ...employee,
+        attendance: openByEmployee.get(employee.id) ?? employee.attendanceRecords?.[0] ?? null,
+        attendanceRecords: undefined,
+      })),
+      total, page: safePage, totalPages: Math.ceil(total / safeLimit),
+    };
+  }
+
+  async manualCheckIn(adminId, adminOrgId, { employeeId, sessionId, password }) {
+    const clockInTime = await getCurrentServerTime();
+    const employee = await this._loadEmployeeForChannel(employeeId, 'MANUAL', true);
+    if (employee.orgId !== adminOrgId) {
+      throw Object.assign(new Error('Employee not found.'), { status: 404 });
+    }
+    if (!password || !(await bcrypt.compare(password, employee.passwordHash))) {
+      throw Object.assign(new Error('Employee password is incorrect.'), { status: 403 });
+    }
+    const session = await this._loadManualSession(sessionId, adminOrgId, clockInTime);
+    if (isSunday(clockInTime, session.office.timezone)) {
+      throw Object.assign(new Error('Attendance is not recorded on Sundays.'), { status: 400 });
+    }
+    if (this._isBeforeOpening(clockInTime, session)) {
+      throw Object.assign(new Error('Check-in opens at the organisation opening time.'), { status: 400, reason: 'CHECKIN_NOT_OPEN' });
+    }
+    if (this._isAfterCheckInDeadline(clockInTime, session)) {
+      throw Object.assign(new Error('The check-in window has closed for today.'), { status: 400, reason: 'CHECKIN_CLOSED' });
+    }
+    const { status, penalty } = this._computeStatusAndPenalty(clockInTime, session);
+    const record = await this._persistCheckIn({
+      employeeId, sessionId, date: attendanceDate(clockInTime, {
+        ...session.office,
+        openingReference: session.startTime,
+      }),
+      clockInTime, status, penalty,
+      checkInSource: 'MANUAL', checkInRecordedById: adminId,
+      wifiVerified: false, deviceVerified: false,
+    });
+    this._emit('attendance:checkin', { record, sessionId, source: 'MANUAL' });
+    return { record, status, penalty, clockInTime };
+  }
+
+  async manualCheckOut(adminId, adminOrgId, { employeeId, sessionId, password }) {
+    const employee = await this._loadEmployeeForChannel(employeeId, 'MANUAL', true);
+    if (employee.orgId !== adminOrgId) {
+      throw Object.assign(new Error('Employee not found.'), { status: 404 });
+    }
+    if (!password || !(await bcrypt.compare(password, employee.passwordHash))) {
+      throw Object.assign(new Error('Employee password is incorrect.'), { status: 403 });
+    }
+    const record = await prisma.attendanceRecord.findFirst({
+      where: {
+        employeeId,
+        ...(sessionId ? { sessionId } : {}),
+        clockInTime: { not: null },
+        clockOutTime: null,
+        session: { office: { orgId: adminOrgId } },
+      },
+      orderBy: { clockInTime: 'desc' },
+      include: {
+        session: {
+          select: {
+            startTime: true,
+            office: { select: { orgId: true, openTime: true, closeTime: true, timezone: true } },
+          },
+        },
+      },
+    });
+    if (!record) throw Object.assign(new Error('No open attendance record found for this employee.'), { status: 404 });
+    const clockOutTime = await getCurrentServerTime();
+    this._assertCheckoutAllowed(record, clockOutTime);
+    const totalWorkHours = parseFloat(((clockOutTime - record.clockInTime) / 3600000).toFixed(2));
+    const changed = await prisma.attendanceRecord.updateMany({
+      where: { id: record.id, clockOutTime: null },
+      data: {
+        clockOutTime, totalWorkHours,
+        checkOutSource: 'MANUAL', checkOutRecordedById: adminId,
+      },
+    });
+    if (!changed.count) throw Object.assign(new Error('Employee is already checked out.'), { status: 409 });
+    const updated = await prisma.attendanceRecord.findUnique({ where: { id: record.id } });
+    this._emit('attendance:checkout', { record: updated, sessionId: record.sessionId, source: 'MANUAL' });
+    return { record: updated, clockOutTime: updated.clockOutTime };
+  }
+
+  _assertCheckoutAllowed(record, clockOutTime) {
+    const office = record.session?.office;
+    if (!office?.closeTime) return;
+    if (isSunday(clockOutTime, office.timezone)) {
+      throw Object.assign(new Error('Attendance is not recorded on Sundays.'), { status: 400, reason: 'SUNDAY_CLOSED' });
+    }
+
+    const opening = openingOccurrence(
+      record.session.startTime,
+      office.openTime,
+      office.timezone,
+      office.closeTime,
+      record.session.startTime,
+    );
+    let closeAt = atZonedTime(record.session.startTime, office.closeTime, office.timezone);
+    if (opening && closeAt && closeAt <= opening) {
+      closeAt = atZonedTime(record.session.startTime, office.closeTime, office.timezone, 1);
+    }
+    if (closeAt && clockOutTime < closeAt) {
+      throw Object.assign(
+        new Error(`Check-out is available after the organisation closes at ${office.closeTime} (${office.timezone || 'Africa/Lagos'}).`),
+        { status: 400, reason: 'CHECKOUT_TOO_EARLY' }
+      );
+    }
+  }
+
+  async _loadEmployeeForChannel(employeeId, channel, includePassword = false) {
+    const employee = await prisma.user.findUnique({
+      where: { id: employeeId },
+      select: {
+        id: true, orgId: true, role: true, status: true, checkInMethod: true,
+        ...(includePassword ? { passwordHash: true } : {}),
+        organization: {
+          select: {
+            id: true, allowDeviceCheckIn: true, allowManualCheckIn: true,
+            hasStudents: true, openingTime: true, timezone: true,
+          },
+        },
+      },
+    });
+    if (!employee || employee.role !== 'EMPLOYEE' || employee.status !== 'ACTIVE') {
+      throw Object.assign(new Error('Active employee account not found.'), { status: 403 });
+    }
+    EmployeePolicy.assertChannelAllowed(employee.organization, employee.checkInMethod, channel);
+    return employee;
+  }
+
+  async _loadManualSession(sessionId, orgId, now) {
+    const session = await prisma.attendanceSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true, status: true, startTime: true, endTime: true,
+        office: {
+          select: {
+            id: true, orgId: true, isActive: true, timezone: true, openTime: true, closeTime: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+          },
+        },
+      },
+    });
+    if (
+      !session || session.status !== 'ACTIVE' || !session.office?.isActive ||
+      session.office.orgId !== orgId || now < session.startTime ||
+      (session.endTime && now > session.endTime)
+    ) {
+      throw Object.assign(new Error('No active attendance session was found for this organization.'), { status: 400 });
+    }
+    return session;
+  }
+
+  async _persistCheckIn(data) {
+    const key = {
+      employeeId_sessionId_date: {
+        employeeId: data.employeeId,
+        sessionId: data.sessionId,
+        date: data.date,
+      },
+    };
+    const existing = await prisma.attendanceRecord.findUnique({ where: key });
+    if (existing?.clockInTime) {
+      throw Object.assign(new Error('Already clocked in for this session today.'), { status: 409 });
+    }
+    const recordData = {
+      clockInTime: data.clockInTime,
+      status: data.status,
+      penalty: data.penalty,
+      checkInSource: data.checkInSource,
+      checkInRecordedById: data.checkInRecordedById ?? null,
+      scanResult: data.scanResult ?? null,
+      wifiVerified: data.wifiVerified ?? false,
+      deviceVerified: data.deviceVerified ?? false,
+      deviceId: data.deviceId ?? null,
+      wifiSSID: data.wifiSSID ?? null,
+    };
+    if (existing) {
+      const changed = await prisma.attendanceRecord.updateMany({
+        where: { id: existing.id, clockInTime: null },
+        data: recordData,
+      });
+      if (!changed.count) {
+        throw Object.assign(new Error('Already clocked in for this session today.'), { status: 409 });
+      }
+      return prisma.attendanceRecord.findUnique({ where: { id: existing.id } });
+    }
+    try {
+      return await prisma.attendanceRecord.create({
+        data: {
+          id: uuidv4(), employeeId: data.employeeId, sessionId: data.sessionId,
+          date: data.date, ...recordData,
+        },
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        throw Object.assign(new Error('Already clocked in for this session today.'), { status: 409 });
+      }
+      throw error;
+    }
   }
 
   // ── Verification pipeline: Device Binding → Wi-Fi → Geo-fence ──────────────────
@@ -423,31 +875,84 @@ class AttendanceService {
   //  > lateAfterMinutes after open  → LATE,    latePenalty  (₦ off salary)
   _computeStatusAndPenalty(clockInTime, session) {
     const o = session.office ?? {};
-    const grace        = o.graceMinutes     ?? 30;
-    const lateAfter    = o.lateAfterMinutes ?? 90;
-    const gracePenalty = o.gracePenalty     ?? 0;
-    const latePenalty  = o.latePenalty      ?? 0;
-
-    // Reference = today at the office's openTime; fall back to session start.
-    let ref = session.startTime;
-    if (o.openTime && /^\d{1,2}:\d{2}$/.test(o.openTime)) {
-      const [h, m] = o.openTime.split(':').map(Number);
-      ref = new Date(clockInTime); ref.setHours(h, m, 0, 0);
+    if (!o.openTime) {
+      const minutes = (clockInTime.getTime() - session.startTime.getTime()) / 60000;
+      if (minutes <= (o.graceMinutes ?? 30)) return { status: 'PRESENT', penalty: 0, minutesLate: Math.max(0, Math.floor(minutes)) };
+      if (minutes <= (o.lateAfterMinutes ?? 90)) return { status: 'PRESENT', penalty: o.gracePenalty ?? 0, minutesLate: Math.floor(minutes) };
+      return { status: 'LATE', penalty: o.latePenalty ?? 0, minutesLate: Math.floor(minutes) };
     }
+    const configuredLateAfter = Number(o.lateAfterMinutes);
+    const lateAfterMinutes = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
+    return evaluateAttendance(clockInTime, { ...o, lateAfterMinutes, openingReference: session.startTime });
+  }
 
-    const minutesLate = (clockInTime.getTime() - ref.getTime()) / 60000;
-    if (minutesLate <= grace)     return { status: 'PRESENT', penalty: 0 };
-    if (minutesLate <= lateAfter) return { status: 'PRESENT', penalty: gracePenalty };
-    return { status: 'LATE', penalty: latePenalty };
+  _isAfterCheckInDeadline(value, session) {
+    const office = session.office ?? {};
+    if (!office.openTime) return false;
+    const opening = openingOccurrence(session.startTime, office.openTime, office.timezone, office.closeTime, session.startTime);
+    const configuredLateAfter = Number(office.lateAfterMinutes);
+    const lateAfter = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
+    return opening && value >= new Date(opening.getTime() + Math.max(0, lateAfter) * 60_000);
+  }
+
+  _isBeforeOpening(value, session) {
+    const office = session.office ?? {};
+    if (!office.openTime) return false;
+    const opening = openingOccurrence(session.startTime, office.openTime, office.timezone, office.closeTime, session.startTime);
+    return opening && value < opening;
   }
 
   async getStatus(employeeId, date) {
-    const targetDate = date ? new Date(date) : new Date();
-    targetDate.setHours(0, 0, 0, 0);
-    return prisma.attendanceRecord.findFirst({
-      where: { employeeId, date: targetDate },
-      include: { breakRecords: true },
+    const employee = await prisma.user.findUnique({
+      where: { id: employeeId },
+      select: { id: true, organization: { select: { timezone: true } } },
     });
+    if (!employee) return null;
+    if (date) {
+      const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(String(date))
+        ? new Date(`${date}T00:00:00.000Z`)
+        : new Date(date);
+      if (Number.isNaN(targetDate.getTime())) {
+        throw Object.assign(new Error('Invalid attendance date.'), { status: 400 });
+      }
+      return prisma.attendanceRecord.findFirst({
+        where: { employeeId, date: dateOnly(targetDate, employee.organization?.timezone || 'Africa/Lagos') },
+        include: { breakRecords: true, session: { select: { office: { select: { timezone: true } } } } },
+      });
+    }
+
+    const now = await getCurrentServerTime();
+    const activeRecord = await prisma.attendanceRecord.findFirst({
+      where: {
+        employeeId,
+        session: {
+          startTime: { lte: now },
+          OR: [{ endTime: null }, { endTime: { gt: now } }],
+        },
+      },
+      include: {
+        breakRecords: true,
+        session: { select: { office: { select: { timezone: true } } } },
+      },
+      orderBy: { clockInTime: 'desc' },
+    });
+    if (activeRecord) return activeRecord;
+
+    const recent = await prisma.attendanceRecord.findMany({
+      where: { employeeId },
+      include: {
+        breakRecords: true,
+        session: { select: { startTime: true, office: { select: { timezone: true, openTime: true, closeTime: true } } } },
+      },
+      orderBy: { clockInTime: 'desc' },
+      take: 20,
+    });
+    return recent.find((record) => {
+      const office = record.session?.office;
+      if (!office) return false;
+      const localWorkDate = attendanceDate(now, office);
+      return record.date.getTime() === localWorkDate.getTime();
+    }) ?? null;
   }
 
   async getHistory(employeeId, range) {
@@ -457,7 +962,12 @@ class AttendanceService {
     const [records, total] = await Promise.all([
       prisma.attendanceRecord.findMany({
         where: { employeeId, date: { gte: new Date(startDate), lte: new Date(endDate) } },
-        include: { breakRecords: true, session: { select: { sessionName: true } } },
+        include: {
+          breakRecords: true,
+          session: { select: { sessionName: true, office: { select: { name: true, timezone: true } } } },
+          checkInRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
+          checkOutRecorder: { select: { id: true, firstName: true, lastName: true, email: true } },
+        },
         orderBy: { date: 'desc' },
         skip, take: limit,
       }),
@@ -469,16 +979,24 @@ class AttendanceService {
     return { records, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async flagRecord(recordId, reason, adminId) {
+  async flagRecord(recordId, reason, adminId, orgId) {
+    const record = await prisma.attendanceRecord.findFirst({
+      where: { id: recordId, employee: { orgId } }, select: { id: true },
+    });
+    if (!record) throw Object.assign(new Error('Attendance record not found.'), { status: 404 });
     return prisma.attendanceRecord.update({
-      where: { id: recordId },
+      where: { id: record.id },
       data: { flagged: true, flagReason: reason, reviewedBy: adminId },
     });
   }
 
-  async approveRecord(recordId, adminId, notes) {
+  async approveRecord(recordId, adminId, notes, orgId) {
+    const record = await prisma.attendanceRecord.findFirst({
+      where: { id: recordId, employee: { orgId } }, select: { id: true },
+    });
+    if (!record) throw Object.assign(new Error('Attendance record not found.'), { status: 404 });
     return prisma.attendanceRecord.update({
-      where: { id: recordId },
+      where: { id: record.id },
       data: { flagged: false, reviewedBy: adminId, reviewNotes: notes },
     });
   }

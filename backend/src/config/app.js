@@ -19,13 +19,16 @@ const fraudRoutes      = require('../routes/fraud');
 const reportRoutes     = require('../routes/reports');
 const adminRoutes      = require('../routes/admin');
 const superAdminRoutes = require('../routes/superAdmin');
+const publicRegistrationRoutes = require('../routes/publicRegistration');
 
 function createApp() {
   const app = express();
 
   // Don't advertise the framework, and trust the proxy (correct client IPs for rate limiting)
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  // Local-first mode connects directly to Express. Do not trust spoofable
+  // X-Forwarded-* headers until a known hosting proxy is configured later.
+  app.set('trust proxy', false);
 
   // Security headers
   app.use(helmet({
@@ -36,7 +39,7 @@ function createApp() {
     // the Electron desktop app (file:// sends Origin "null"). Auth is a Bearer
     // JWT (not cookies), so permitting null-origin native apps is safe here.
     origin: (origin, cb) => {
-      if (!origin || origin === 'null' || env.CORS_ORIGINS.includes(origin)) return cb(null, true);
+      if (!origin || origin === 'null' || env.isAllowedFrontendOrigin(origin)) return cb(null, true);
       return cb(null, false);
     },
     credentials: true,
@@ -63,6 +66,12 @@ function createApp() {
   // Global per-IP rate limit (anti-DDoS / abuse). The login route has its own
   // stricter brute-force limiter (see routes/auth.js → authLimiter).
   app.use('/api', apiLimiter);
+  // Attendance and session views are live data; never turn an empty 304 into
+  // a blank client view when the browser has cached an older response.
+  app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
 
   // Health check (unauthenticated)
   app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date() }));
@@ -77,6 +86,7 @@ function createApp() {
   app.use('/api/reports',    reportRoutes);
   app.use('/api/admin',      adminRoutes);
   app.use('/api/super',      superAdminRoutes);
+  app.use('/api/register',   publicRegistrationRoutes);
 
   // 404 & error handling
   app.use(notFound);

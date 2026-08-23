@@ -21,11 +21,14 @@ async function main() {
     'scanAttempt',
     'breakRecord',
     'attendanceRecord',
+    'studentAttendance',
+    'student',
     'qRToken',
     'attendanceSession',
     'leaveRequest',
     'leaveBalance',
     'registeredDevice',
+    'adminLoginEvent',
     'adminPermission',
     'refreshToken',
     'breakPolicy',
@@ -51,5 +54,10 @@ async function main() {
 }
 
 main()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect());
+  .catch((error) => {
+    console.error('Database clear failed:', error);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

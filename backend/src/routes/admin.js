@@ -6,15 +6,22 @@ const { isAdmin, isSuperAdmin } = require('../middleware/roleGuard');
 const { validate } = require('../middleware/validate');
 const upload = require('../middleware/upload');
 const { prisma } = require('../config/database');
+const { stationLimiter } = require('../middleware/rateLimiter');
+const studentRoutes = require('./students');
 
-// Admin presence ping — the desktop app calls this on open so the scheduler can
-// mark the admin PRESENT/LATE for the day even when the session token persists.
-router.post('/attendance/ping', authenticate, isAdmin, async (req, res, next) => {
-  try {
-    await require('../services/AttendanceService').recordAdminPresence(req.user.id);
-    res.json({ success: true });
-  } catch (err) { next(err); }
-});
+// Secure employee station. The admin session must already be authenticated;
+// the employee then confirms their own password for each manual action.
+router.get('/manual-attendance', authenticate, isAdmin, ctrl.getManualAttendance);
+router.post('/manual-attendance/check-in', authenticate, isAdmin, stationLimiter, [
+  body('employeeId').isUUID(),
+  body('sessionId').isUUID(),
+  body('password').notEmpty(),
+], validate, ctrl.manualCheckIn);
+router.post('/manual-attendance/check-out', authenticate, isAdmin, stationLimiter, [
+  body('employeeId').isUUID(),
+  body('sessionId').optional({ nullable: true }).isUUID(),
+  body('password').notEmpty(),
+], validate, ctrl.manualCheckOut);
 
 // Organisation
 router.get('/org', authenticate, isAdmin, ctrl.getOrg);
@@ -57,7 +64,10 @@ router.post('/departments', authenticate, isAdmin, [
 
 // Users / Employees
 router.get('/users', authenticate, isAdmin, ctrl.listUsers);
-router.put('/users/:userId', authenticate, isAdmin, ctrl.updateUser);
+router.put('/users/:userId', authenticate, isAdmin, [
+  body('checkInMethod').optional().isIn(['PHONE', 'MANUAL', 'BOTH']),
+  body('phone').optional({ nullable: true }).isString(),
+], validate, ctrl.updateUser);
 router.put('/users/:userId/suspend', authenticate, isAdmin, ctrl.suspendUser);
 router.post('/users/:userId/reset-device', authenticate, isAdmin, ctrl.resetDevice);
 router.delete('/users/:userId', authenticate, isAdmin, ctrl.deleteEmployee);
@@ -67,6 +77,16 @@ router.delete('/users/:userId', authenticate, isAdmin, ctrl.deleteEmployee);
 router.post('/users/:userId/face',
   authenticate,
   isAdmin,
+  async (req, res, next) => {
+    try {
+      const employee = await prisma.user.findFirst({
+        where: { id: req.params.userId, orgId: req.user.orgId, role: 'EMPLOYEE' },
+        select: { id: true },
+      });
+      if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
+      next();
+    } catch (err) { next(err); }
+  },
   upload.single('photo'),
   async (req, res, next) => {
     try {
@@ -94,7 +114,7 @@ router.put('/departments/:departmentId/break-policy', authenticate, isAdmin, ctr
 // Emergency
 router.post('/emergency/stop-all', authenticate, isAdmin, [
   body('reason').notEmpty(),
-  body('officeId').notEmpty(),
+  body('officeId').optional({ checkFalsy: true }).isUUID(),
 ], validate, ctrl.emergencyStopAll);
 
 router.post('/emergency/lock-system', authenticate, isSuperAdmin, [
@@ -116,6 +136,10 @@ router.post('/employees', authenticate, isAdmin, [
   body('lastName').notEmpty(),
   body('email').isEmail().normalizeEmail(),
   body('password').isLength({ min: 8 }),
+  body('checkInMethod').optional().isIn(['PHONE', 'MANUAL', 'BOTH']),
+  body('phone').optional({ nullable: true }).isString(),
 ], validate, ctrl.createEmployee);
+
+router.use('/students', studentRoutes);
 
 module.exports = router;
