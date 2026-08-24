@@ -83,7 +83,7 @@ export const fetchEmployees = async () => {
 };
 export const fetchPlanInfo    = () => api.get<any>('/admin/plan').then((r) => r.data);
 export const createEmployee   = (body: any) => api.post<any>('/admin/employees', body).then((r) => r.data);
-export const updateEmployee   = (id: string, body: { checkInMethod: EmployeeCheckInMethod }) =>
+export const updateEmployee   = (id: string, body: { checkInMethod: EmployeeCheckInMethod; departmentId?: string }) =>
   api.put<any>(`/admin/users/${id}`, body).then((r) => r.data);
 export const suspendUser      = (id: string) => api.put<any>(`/admin/users/${id}/suspend`, {});
 export const activateUser     = (id: string) => api.put<any>(`/admin/users/${id}`, { status: 'ACTIVE' });
@@ -97,7 +97,8 @@ export const approveLeave       = (id: string) => api.put<any>(`/leaves/${id}/ap
 export const rejectLeave        = (id: string, reason: string) => api.put<any>(`/leaves/${id}/reject`, { reason });
 
 // ─── Breaks ──────────────────────────────────────────────────────────────────
-export const fetchDailyBreaks  = () => api.get<any>('/breaks/daily').then((r) => r.data ?? []);
+export const fetchDailyBreaks  = (date?: string) => api.get<any>(`/breaks/daily${date ? `?date=${encodeURIComponent(date)}` : ''}`).then((r) => r.data ?? []);
+export const startEmployeeBreak = (employeeId: string, breakType: string, notes?: string) => api.post<any>(`/admin/breaks/${employeeId}/start`, { breakType, notes }).then((r) => r.data);
 
 // ─── Fraud Alerts ────────────────────────────────────────────────────────────
 export const fetchAlerts      = () => api.get<any>('/fraud').then((r) => r.data ?? []);

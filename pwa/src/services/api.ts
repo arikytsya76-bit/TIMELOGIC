@@ -68,7 +68,7 @@ async function request<T>(path: string, options: RequestInit = {}, allowRefresh 
       },
     });
   } catch {
-    throw new Error(`Cannot reach the local backend at ${API_URL}. Start it and try again.`);
+    throw new Error(`Cannot reach the TimeLogic backend at ${API_URL}. Check your connection and try again.`);
   }
 
   let body: any = null;

@@ -25,6 +25,7 @@ const listOrgs = async (req, res, next) => {
         departments: {
           select: {
             id: true, name: true,
+            breakPolicy: true,
             manager: { select: { id: true, firstName: true, lastName: true } },
             _count: { select: { employees: true } },
           },
@@ -579,7 +580,7 @@ const systemReport = async (req, res, next) => {
 const addDepartment = async (req, res, next) => {
   try {
     const { orgId } = req.params;
-    const { name } = req.body;
+    const { name, breakStart = null, breakEnd = null, totalDailyBreakLimit = 90, maxShortBreaks = 2, maxShortBreakMinutes = 15, maxLunchMinutes = 60 } = req.body;
     if (!name?.trim()) return res.status(400).json({ success: false, message: 'Department name is required.' });
 
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
@@ -604,12 +605,39 @@ const addDepartment = async (req, res, next) => {
         maxLunchMinutes: 60,
         maxShortBreaks: 2,
         maxShortBreakMinutes: 15,
-        totalDailyBreakLimit: 90,
+        totalDailyBreakLimit: Number(totalDailyBreakLimit) || 90,
+        maxShortBreaks: Number(maxShortBreaks) || 2,
+        maxShortBreakMinutes: Number(maxShortBreakMinutes) || 15,
+        maxLunchMinutes: Number(maxLunchMinutes) || 60,
+        breakStart, breakEnd,
         appliesTo: ['MORNING', 'AFTERNOON', 'FLEXIBLE'],
       },
     }).catch(() => {}); // non-critical
 
     res.status(201).json({ success: true, data: { ...dept, orgName: org.name } });
+  } catch (err) { next(err); }
+};
+
+const getDepartmentBreakPolicy = async (req, res, next) => {
+  try {
+    const department = await prisma.department.findUnique({ where: { id: req.params.departmentId }, include: { breakPolicy: true } });
+    if (!department) return res.status(404).json({ success: false, message: 'Department not found.' });
+    res.json({ success: true, data: department.breakPolicy ?? {} });
+  } catch (err) { next(err); }
+};
+
+const updateDepartmentBreakPolicy = async (req, res, next) => {
+  try {
+    const { departmentId } = req.params;
+    const department = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+    if (!department) return res.status(404).json({ success: false, message: 'Department not found.' });
+    const allowed = ['policyName', 'maxLunchMinutes', 'maxShortBreaks', 'maxShortBreakMinutes', 'totalDailyBreakLimit', 'autoEndAfterMinutes', 'breakStart', 'breakEnd', 'requiresApproval', 'appliesTo'];
+    const data = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
+    for (const key of ['maxLunchMinutes', 'maxShortBreaks', 'maxShortBreakMinutes', 'totalDailyBreakLimit', 'autoEndAfterMinutes']) {
+      if (data[key] !== undefined) data[key] = Number(data[key]);
+    }
+    const policy = await prisma.breakPolicy.upsert({ where: { departmentId }, update: data, create: { id: uuidv4(), departmentId, policyName: data.policyName || 'Department Break Policy', ...data } });
+    res.json({ success: true, data: policy });
   } catch (err) { next(err); }
 };
 
@@ -722,4 +750,4 @@ const setLeavePolicy = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listOrgs, createOrg, updateOrg, deleteOrg, orgUsers, systemStats, getNotifications, officeSecurityDetail, updateOfficeSecurity, systemReport, addDepartment, employeeFullRecord, reemployEmployee, suspendAdmin, activateAdmin, reassignEmployee, updateProfile, resetSystem, getLeavePolicy, setLeavePolicy };
+module.exports = { listOrgs, createOrg, updateOrg, deleteOrg, orgUsers, systemStats, getNotifications, officeSecurityDetail, updateOfficeSecurity, systemReport, addDepartment, getDepartmentBreakPolicy, updateDepartmentBreakPolicy, employeeFullRecord, reemployEmployee, suspendAdmin, activateAdmin, reassignEmployee, updateProfile, resetSystem, getLeavePolicy, setLeavePolicy };

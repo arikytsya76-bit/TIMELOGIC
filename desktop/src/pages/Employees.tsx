@@ -121,16 +121,19 @@ function AddEmployeeModal({ depts, organization, onClose, onSaved }: { depts: an
 function EditCheckInMethodModal({
   employee,
   organization,
+  departments,
   onClose,
   onSaved,
 }: {
   employee: any;
   organization: AdminOrganization;
+  departments: any[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const methods = availableMethods(organization);
   const current = employee.checkInMethod as EmployeeCheckInMethod | undefined;
+  const [departmentId, setDepartmentId] = useState(employee.departmentId ?? '');
   const [method, setMethod] = useState<EmployeeCheckInMethod>(() => (
     current && methods.includes(current) ? current : defaultMethod(organization)
   ));
@@ -145,7 +148,7 @@ function EditCheckInMethodModal({
     setLoading(true);
     setError('');
     try {
-      await updateEmployee(employee.id, { checkInMethod: method });
+      await updateEmployee(employee.id, { checkInMethod: method, departmentId });
       onSaved();
       onClose();
     } catch (err) {
@@ -162,6 +165,14 @@ function EditCheckInMethodModal({
           <div>
             <h2 className="text-lg font-bold text-[var(--text-main)]">Edit Check-In Method</h2>
             <p className="text-xs text-[var(--text-muted)] mt-0.5">{employee.firstName} {employee.lastName}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-[var(--text-muted)] mb-1.5">Department</label>
+            <select value={departmentId} onChange={(event) => setDepartmentId(event.target.value)} className="w-full border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-main)] rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500">
+              <option value="">No department</option>
+              {departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
+            </select>
+            <p className="text-[11px] text-[var(--text-muted)] mt-1">The employee will follow this department's break window immediately.</p>
           </div>
           <button onClick={onClose} className="text-[var(--text-muted)]"><X size={20} /></button>
         </div>
@@ -489,7 +500,7 @@ export default function Employees() {
         )}
       </div>
       {showAdd && organization && <AddEmployeeModal depts={depts} organization={organization} onClose={() => setShowAdd(false)} onSaved={load} />}
-      {editEmp && organization && <EditCheckInMethodModal employee={editEmp} organization={organization} onClose={() => setEditEmp(null)} onSaved={load} />}
+      {editEmp && organization && <EditCheckInMethodModal employee={editEmp} organization={organization} departments={depts} onClose={() => setEditEmp(null)} onSaved={load} />}
       {viewEmp && <EmployeeDetailModal emp={viewEmp} onClose={() => setViewEmp(null)} onRefresh={load} />}
     </div>
   );

@@ -60,6 +60,8 @@ router.put('/organizations/:id/leave-policy',    ctrl.setLeavePolicy);
 router.post('/organizations/:orgId/departments', [
   body('name').notEmpty().withMessage('Department name is required'),
 ], validate, ctrl.addDepartment);
+router.get('/departments/:departmentId/break-policy', ctrl.getDepartmentBreakPolicy);
+router.put('/departments/:departmentId/break-policy', ctrl.updateDepartmentBreakPolicy);
 router.get('/offices/:officeId/security',        ctrl.officeSecurityDetail);
 router.put('/offices/:officeId/settings',        ctrl.updateOfficeSecurity);
 router.get('/reports',                           ctrl.systemReport);

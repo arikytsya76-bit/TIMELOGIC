@@ -10,6 +10,19 @@ const startBreak = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const startBreakForEmployee = async (req, res, next) => {
+  try {
+    const employee = await prisma.user.findFirst({
+      where: { id: req.params.employeeId, orgId: req.user.orgId, role: 'EMPLOYEE', status: { not: 'TERMINATED' } },
+      select: { id: true },
+    });
+    if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    const { breakType, notes } = req.body;
+    const record = await BreakService.startBreakForEmployee(employee.id, breakType, notes || `Started by admin ${req.user.id}`);
+    res.status(201).json({ success: true, data: record });
+  } catch (err) { next(err); }
+};
+
 const endBreak = async (req, res, next) => {
   try {
     const { wifiSSID } = req.body;
@@ -58,7 +71,9 @@ const getDailyBreaks = async (req, res, next) => {
           employee: {
             select: {
               id: true, firstName: true, lastName: true,
-              employeeCode: true, department: { select: { name: true } },
+              employeeCode: true,
+              organization: { select: { timezone: true } },
+              department: { select: { name: true, breakPolicy: true } },
             },
           },
         },
@@ -74,4 +89,4 @@ const getDailyBreaks = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { startBreak, endBreak, getActiveBreak, getDailyBreaks };
+module.exports = { startBreak, startBreakForEmployee, endBreak, getActiveBreak, getDailyBreaks };

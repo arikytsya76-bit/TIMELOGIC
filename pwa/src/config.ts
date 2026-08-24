@@ -8,8 +8,10 @@ function isPrivateHost(hostname: string): boolean {
 }
 
 const pageHost = window.location.hostname.toLowerCase();
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
+const API_ORIGIN = "https://timelogic.onrender.com/api";
 const backendHost = isPrivateHost(pageHost) ? pageHost : "localhost";
-export const API_URL = `http://${backendHost}:5000/api`;
+export const API_URL = configuredApiUrl || (isPrivateHost(pageHost) ? `http://${backendHost}:5000/api` : API_ORIGIN);
 
 // This client is the iOS / web PWA. The backend uses this to verify attendance
 // by office network IP (browsers cannot read the Wi-Fi SSID) + device + time.

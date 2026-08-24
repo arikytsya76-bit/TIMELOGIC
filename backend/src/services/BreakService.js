@@ -49,6 +49,10 @@ class BreakService {
     });
   }
 
+  async startBreakForEmployee(employeeId, breakType, notes = null) {
+    return this.startBreak(employeeId, breakType, notes);
+  }
+
   async endBreak(employeeId, breakId, ctx = {}) {
     const breakRecord = await prisma.breakRecord.findFirst({
       where: { id: breakId, employeeId, endTime: null },
