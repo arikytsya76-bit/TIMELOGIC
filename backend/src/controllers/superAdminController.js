@@ -620,7 +620,7 @@ const addDepartment = async (req, res, next) => {
 
 const getDepartmentBreakPolicy = async (req, res, next) => {
   try {
-    const department = await prisma.department.findUnique({ where: { id: req.params.departmentId }, include: { breakPolicy: true } });
+    const department = await prisma.department.findUnique({ where: { id: req.params.departmentId }, include: { breakPolicy: true, organization: { select: { id: true } } } });
     if (!department) return res.status(404).json({ success: false, message: 'Department not found.' });
     res.json({ success: true, data: department.breakPolicy ?? {} });
   } catch (err) { next(err); }
@@ -629,12 +629,17 @@ const getDepartmentBreakPolicy = async (req, res, next) => {
 const updateDepartmentBreakPolicy = async (req, res, next) => {
   try {
     const { departmentId } = req.params;
-    const department = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true } });
+    const department = await prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, breakPolicy: true } });
     if (!department) return res.status(404).json({ success: false, message: 'Department not found.' });
     const allowed = ['policyName', 'maxLunchMinutes', 'maxShortBreaks', 'maxShortBreakMinutes', 'totalDailyBreakLimit', 'autoEndAfterMinutes', 'breakStart', 'breakEnd', 'requiresApproval', 'appliesTo'];
     const data = Object.fromEntries(Object.entries(req.body).filter(([key]) => allowed.includes(key)));
     for (const key of ['maxLunchMinutes', 'maxShortBreaks', 'maxShortBreakMinutes', 'totalDailyBreakLimit', 'autoEndAfterMinutes']) {
       if (data[key] !== undefined) data[key] = Number(data[key]);
+    }
+    const nextBreakStart = data.breakStart ?? department.breakPolicy?.breakStart;
+    const nextBreakEnd = data.breakEnd ?? department.breakPolicy?.breakEnd;
+    if (nextBreakStart && nextBreakEnd && nextBreakStart > nextBreakEnd) {
+      return res.status(400).json({ success: false, message: 'Break end time must be at or after break start time.' });
     }
     const policy = await prisma.breakPolicy.upsert({ where: { departmentId }, update: data, create: { id: uuidv4(), departmentId, policyName: data.policyName || 'Department Break Policy', ...data } });
     res.json({ success: true, data: policy });

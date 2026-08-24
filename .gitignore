@@ -1,4 +1,5 @@
-# Dependencies
+#
+ Dependencies
 **/node_modules/
 
 # Environment & secrets (templates are kept below)

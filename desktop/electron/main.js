@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Menu } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 
 // app.isPackaged is false when running via `electron .` in dev, true in a built binary
@@ -38,8 +39,16 @@ function createWindow() {
   }
 }
 
+function checkForUpdates() {
+  if (isDev) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.checkForUpdatesAndNotify().catch(() => {});
+}
+
 app.whenReady().then(() => {
   createWindow();
+  checkForUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -35,6 +35,16 @@ const organizationPolicyValidators = [
   }),
 ];
 
+const breakPolicyValidators = [
+  body('breakStart').optional({ nullable: true }).matches(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  body('breakEnd').optional({ nullable: true }).matches(/^(?:[01]\d|2[0-3]):[0-5]\d$/),
+  body('maxLunchMinutes').optional().isInt({ min: 0 }),
+  body('maxShortBreaks').optional().isInt({ min: 0 }),
+  body('maxShortBreakMinutes').optional().isInt({ min: 0 }),
+  body('totalDailyBreakLimit').optional().isInt({ min: 0 }),
+  body('autoEndAfterMinutes').optional().isInt({ min: 1 }),
+];
+
 // All routes require authentication + SUPER_ADMIN role
 router.use(authenticate, isSuperAdmin);
 
@@ -59,9 +69,10 @@ router.get('/organizations/:id/leave-policy',    ctrl.getLeavePolicy);
 router.put('/organizations/:id/leave-policy',    ctrl.setLeavePolicy);
 router.post('/organizations/:orgId/departments', [
   body('name').notEmpty().withMessage('Department name is required'),
+  ...breakPolicyValidators,
 ], validate, ctrl.addDepartment);
 router.get('/departments/:departmentId/break-policy', ctrl.getDepartmentBreakPolicy);
-router.put('/departments/:departmentId/break-policy', ctrl.updateDepartmentBreakPolicy);
+router.put('/departments/:departmentId/break-policy', breakPolicyValidators, validate, ctrl.updateDepartmentBreakPolicy);
 router.get('/offices/:officeId/security',        ctrl.officeSecurityDetail);
 router.put('/offices/:officeId/settings',        ctrl.updateOfficeSecurity);
 router.get('/reports',                           ctrl.systemReport);

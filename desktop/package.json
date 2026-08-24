@@ -1,6 +1,6 @@
 {
   "name": "attendance-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "TimeLogic — Admin Desktop App",
   "author": "TimeLogic <support@timelogic.app>",
   "homepage": "https://timelogic.pages.dev",
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "electron": "electron .",
+    "publish:update": "electron-builder --win nsis --publish always",
     "preview": "vite preview",
     "dist": "npm run dist:win",
     "dist:linux": "npm run build && electron-builder --linux deb --x64",
@@ -32,6 +33,12 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
     },
+    "publish": [{
+      "provider": "github",
+      "owner": "akenuw",
+      "repo": "timelogic-downloads",
+      "releaseType": "release"
+    }],
     "linux": {
       "target": [{ "target": "deb", "arch": ["x64"] }],
       "icon": "../mobile/assets/icon.png",
@@ -60,6 +67,7 @@
     }
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

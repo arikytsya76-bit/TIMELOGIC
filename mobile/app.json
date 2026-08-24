@@ -9,6 +9,11 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
+    "runtimeVersion": { "policy": "appVersion" },
+    "updates": {
+      "url": "https://u.expo.dev/d6d5b887-5b49-40ef-be01-857fde124fa1",
+      "fallbackToCacheTimeout": 0
+    },
     "android": {
       "versionCode": 1,
       "adaptiveIcon": {
