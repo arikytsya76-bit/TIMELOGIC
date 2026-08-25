@@ -192,6 +192,31 @@ const getHistory = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getMonthlyPenalties = async (req, res, next) => {
+  try {
+    const month = String(req.query.month || '');
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ success: false, message: 'month must use YYYY-MM format.' });
+    const [year, monthNumber] = month.split('-').map(Number);
+    const start = new Date(Date.UTC(year, monthNumber - 1, 1));
+    const end = new Date(Date.UTC(year, monthNumber, 1));
+    const daysInMonth = new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+    const employees = await prisma.user.findMany({
+      where: { orgId: req.user.orgId, role: 'EMPLOYEE', status: { not: 'TERMINATED' } },
+      select: { id: true, firstName: true, lastName: true, employeeCode: true, department: { select: { name: true } } },
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
+    });
+    const penalties = await prisma.attendanceRecord.groupBy({
+      by: ['employeeId'],
+      where: { employee: { orgId: req.user.orgId, role: 'EMPLOYEE' }, date: { gte: start, lt: end } },
+      _sum: { penalty: true }, _count: { _all: true },
+    });
+    const totals = new Map(penalties.map((row) => [row.employeeId, row]));
+    res.json({ success: true, data: { month, daysInMonth, employees: employees.map((employee) => ({
+      ...employee, totalPenalty: totals.get(employee.id)?._sum.penalty ?? 0, attendanceCount: totals.get(employee.id)?._count._all ?? 0,
+    })) } });
+  } catch (err) { next(err); }
+};
+
 const flagRecord = async (req, res, next) => {
   try {
     const { reason } = req.body;
@@ -253,4 +278,4 @@ const getFlagged = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { network, issueChallenge, checkIn, checkOut, heartbeat, getStatus, getHistory, getLiveAttendance, flagRecord, approveRecord, getFlagged, getCurrentSession };
+module.exports = { network, issueChallenge, checkIn, checkOut, heartbeat, getStatus, getHistory, getMonthlyPenalties, getLiveAttendance, flagRecord, approveRecord, getFlagged, getCurrentSession };

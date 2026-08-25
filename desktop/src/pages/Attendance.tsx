@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, AlertTriangle, Wifi, Smartphone, Flag, UserCheck, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchLiveAttendance, fetchAttendanceHistory, flagRecord, approveRecord } from '../services';
+import { fetchLiveAttendance, fetchAttendanceForDate, fetchMonthlyPenalties, flagRecord, approveRecord } from '../services';
 import { useAuth } from '../context/AuthContext';
 
 const STATUS_STYLE: Record<string, string> = {
@@ -31,14 +31,16 @@ export default function Attendance() {
   const [filter, setFilter] = useState('All');
   const [view, setView] = useState<'today' | 'past'>('today');
   const [pastDate, setPastDate] = useState('');
+  const [monthlyPenalties, setMonthlyPenalties] = useState<any>(null);
 
   const load = async () => {
     try {
       setError('');
       const next = view === 'today'
         ? await fetchLiveAttendance()
-        : await fetchAttendanceHistory('2000-01-01', pastDate);
+        : await fetchAttendanceForDate(pastDate);
       setRecords(next);
+      if (view === 'past') setMonthlyPenalties(await fetchMonthlyPenalties(pastDate.slice(0, 7)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load live attendance records.');
     } finally {
@@ -77,7 +79,7 @@ export default function Attendance() {
       )} />
       <div className="flex-1 overflow-y-auto p-6">
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {!loading && !error && records.length > 0 && <p className="mb-3 text-xs font-semibold text-emerald-700">{records.length} live attendance record{records.length === 1 ? '' : 's'} from the server</p>}
+        {!loading && !error && records.length > 0 && <p className="mb-3 text-xs font-semibold text-emerald-700">{view === 'today' ? `${records.length} live attendance record${records.length === 1 ? '' : 's'} from the server` : `${records.length} attendance record${records.length === 1 ? '' : 's'} for ${pastDate}`}</p>}
         <div className="flex items-center gap-2 mb-4">
           {(['today', 'past'] as const).map((option) => <button key={option} onClick={() => setView(option)} className={`text-xs font-semibold px-3 py-2 rounded-xl ${view === option ? 'bg-primary-700 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>{option === 'today' ? 'Today' : 'Past Attendance'}</button>)}
           {view === 'past' && <input type="date" value={pastDate} onChange={(e) => setPastDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />}
@@ -172,6 +174,30 @@ export default function Attendance() {
               </tbody>
             </table>
             {filtered.length === 0 && <div className="text-center py-12 text-slate-400 text-sm">No records found</div>}
+          </div>
+        )}
+        {view === 'past' && monthlyPenalties && (
+          <div className="mt-6 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100">
+              <h2 className="font-bold text-slate-800">Month-end penalty summary</h2>
+              <p className="text-xs text-slate-500 mt-1">{monthlyPenalties.month} has {monthlyPenalties.daysInMonth} days. Totals include the full calendar month.</p>
+            </div>
+            <table className="w-full text-sm">
+              <thead><tr className="bg-slate-50 border-b border-slate-100">
+                <th className="text-left text-xs font-semibold text-slate-500 px-5 py-3">Employee</th>
+                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Department</th>
+                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Attendance days</th>
+                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Total penalty</th>
+              </tr></thead>
+              <tbody className="divide-y divide-slate-50">
+                {monthlyPenalties.employees.map((employee: any) => <tr key={employee.id}>
+                  <td className="px-5 py-3 font-semibold text-slate-800">{employee.firstName} {employee.lastName} <span className="text-xs font-normal text-slate-400">{employee.employeeCode || ''}</span></td>
+                  <td className="px-4 py-3 text-slate-500">{employee.department?.name ?? 'No department'}</td>
+                  <td className="px-4 py-3 text-slate-700">{employee.attendanceCount}</td>
+                  <td className="px-4 py-3 font-bold text-red-600">₦{Number(employee.totalPenalty).toLocaleString()}</td>
+                </tr>)}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

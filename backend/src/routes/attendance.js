@@ -46,6 +46,7 @@ router.get('/history', authenticate, [
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
 ], validate, ctrl.getHistory);
+router.get('/penalties/monthly', authenticate, isAdmin, [query('month').matches(/^\d{4}-(0[1-9]|1[0-2])$/).withMessage('month must use YYYY-MM format')], validate, ctrl.getMonthlyPenalties);
 
 router.get('/history/:employeeId', authenticate, isAdmin, ctrl.getHistory);
 
