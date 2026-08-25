@@ -75,12 +75,12 @@ export const manualEmployeeCheckOut = (body: { employeeId: string; sessionId?: s
 // ─── Employees ───────────────────────────────────────────────────────────────
 export const fetchEmployees = async () => {
   const first = await api.get<any>('/admin/users?role=EMPLOYEE&page=1&limit=100');
-  const rows = Array.isArray(first.data) ? first.data : [];
+  const rows = Array.isArray(first) ? first : Array.isArray(first.data) ? first.data : Array.isArray(first.data?.users) ? first.data.users : Array.isArray(first.records) ? first.records : [];
   const totalPages = Math.max(1, Number(first.totalPages) || 1);
   if (totalPages === 1) return rows;
   const rest = await Promise.all(
     Array.from({ length: totalPages - 1 }, (_, index) =>
-      api.get<any>(`/admin/users?role=EMPLOYEE&page=${index + 2}&limit=100`).then((r) => Array.isArray(r.data) ? r.data : []),
+      api.get<any>(`/admin/users?role=EMPLOYEE&page=${index + 2}&limit=100`).then((r) => Array.isArray(r) ? r : Array.isArray(r.data) ? r.data : Array.isArray(r.data?.users) ? r.data.users : []),
     ),
   );
   return [...rows, ...rest.flat()];

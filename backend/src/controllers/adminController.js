@@ -407,11 +407,12 @@ const employeeSummary = async (req, res, next) => {
       select: { id: true },
     });
     if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
-    const [penalties, attendanceCount] = await Promise.all([
+    const [penalties, breakPenalties, attendanceCount] = await Promise.all([
       prisma.attendanceRecord.aggregate({ where: { employeeId: employee.id }, _sum: { penalty: true } }),
+      prisma.breakRecord.aggregate({ where: { employeeId: employee.id }, _sum: { penalty: true } }),
       prisma.attendanceRecord.count({ where: { employeeId: employee.id } }),
     ]);
-    res.json({ success: true, data: { totalPenalty: penalties._sum.penalty ?? 0, attendanceCount } });
+    res.json({ success: true, data: { totalPenalty: (penalties._sum.penalty ?? 0) + (breakPenalties._sum.penalty ?? 0), attendanceCount } });
   } catch (err) { next(err); }
 };
 

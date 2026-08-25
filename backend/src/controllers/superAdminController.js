@@ -580,7 +580,7 @@ const systemReport = async (req, res, next) => {
 const addDepartment = async (req, res, next) => {
   try {
     const { orgId } = req.params;
-    const { name, breakStart = null, breakEnd = null, totalDailyBreakLimit = 90, maxShortBreaks = 2, maxShortBreakMinutes = 15, maxLunchMinutes = 60, overstayPenalty = 100 } = req.body;
+    const { name, breakStart = null, breakEnd = null, totalDailyBreakLimit = 90, maxShortBreaks = 2, maxShortBreakMinutes = 15, maxLunchMinutes = 60, overstayPenalty = 50 } = req.body;
     if (!name?.trim()) return res.status(400).json({ success: false, message: 'Department name is required.' });
 
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { id: true, name: true } });
@@ -609,7 +609,7 @@ const addDepartment = async (req, res, next) => {
         maxShortBreaks: Number(maxShortBreaks) || 2,
         maxShortBreakMinutes: Number(maxShortBreakMinutes) || 15,
         maxLunchMinutes: Number(maxLunchMinutes) || 60,
-        overstayPenalty: Number(overstayPenalty) || 100,
+        overstayPenalty: Number(overstayPenalty) || 50,
         breakStart, breakEnd,
         appliesTo: ['MORNING', 'AFTERNOON', 'FLEXIBLE'],
       },

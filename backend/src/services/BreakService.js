@@ -22,7 +22,7 @@ class BreakService {
     return Number(policy.overstayPenalty) || 0;
   }
 
-  async startBreak(employeeId, breakType, notes = null) {
+  async startBreak(employeeId, breakType, notes = null, startedByAdmin = false) {
     const record = await prisma.attendanceRecord.findFirst({
       where: { employeeId, clockInTime: { not: null }, clockOutTime: null },
       orderBy: { clockInTime: 'desc' },
@@ -57,12 +57,12 @@ class BreakService {
     if (!check.allowed) throw Object.assign(new Error(check.reason), { status: 400 });
 
     return prisma.breakRecord.create({
-      data: { id: uuidv4(), attendanceRecordId: record.id, employeeId, breakType, startTime: serverNow, notes },
+      data: { id: uuidv4(), attendanceRecordId: record.id, employeeId, breakType, startTime: serverNow, notes, startedByAdmin },
     });
   }
 
   async startBreakForEmployee(employeeId, breakType, notes = null) {
-    return this.startBreak(employeeId, breakType, notes);
+    return this.startBreak(employeeId, breakType, notes, true);
   }
 
   async endBreak(employeeId, breakId, ctx = {}) {
@@ -71,6 +71,9 @@ class BreakService {
       include: { attendanceRecord: { select: { sessionId: true, session: { select: { office: { select: { wifiSSID: true } } } } } } },
     });
     if (!breakRecord) throw Object.assign(new Error('Break not found or already ended'), { status: 404 });
+    if (breakRecord.startedByAdmin && !ctx.admin) {
+      throw Object.assign(new Error('This break was started by an admin. Only an admin can end it.'), { status: 403 });
+    }
 
     const endTime = await getCurrentServerTime();
     const durationMinutes = Math.floor((endTime - breakRecord.startTime) / 60000);

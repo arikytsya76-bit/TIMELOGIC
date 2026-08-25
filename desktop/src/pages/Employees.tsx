@@ -357,8 +357,10 @@ export default function Employees() {
   const [viewEmp, setViewEmp] = useState<any>(null);
   const [editEmp, setEditEmp] = useState<any>(null);
   const [plan, setPlan] = useState<any>(null);
+  const [loadError, setLoadError] = useState('');
 
   const load = () => {
+    setLoadError('');
     Promise.all([fetchEmployees(), fetchDepartments(), fetchPlanInfo().catch(() => null)])
       .then(([e, d, p]) => {
         const emps = e.filter((u: any) => u.role === 'EMPLOYEE');
@@ -370,9 +372,10 @@ export default function Employees() {
           if (fresh) setViewEmp(fresh);
         }
       })
+        .catch((err: any) => setLoadError(err?.message ?? 'Could not load employees.'))
       .finally(() => setLoading(false));
   };
-  useEffect(() => { load(); }, []);
+      useEffect(() => { load(); const timer = setInterval(load, 10000); return () => clearInterval(timer); }, []);
 
   const filtered = employees.filter((e) => {
     const name = `${e.firstName} ${e.lastName} ${e.email} ${e.employeeCode ?? ''}`.toLowerCase();
@@ -404,6 +407,7 @@ export default function Employees() {
         }
       />
       <div className="flex-1 overflow-y-auto p-6">
+        {loadError && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div>}
         <div className="flex items-center gap-3 mb-5">
           <div className="relative flex-1 max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />

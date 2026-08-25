@@ -26,7 +26,7 @@ const startBreakForEmployee = async (req, res, next) => {
 const endBreak = async (req, res, next) => {
   try {
     const { wifiSSID } = req.body;
-    const record = await BreakService.endBreak(req.user.id, req.params.breakId, { wifiSSID });
+    const record = await BreakService.endBreak(req.user.id, req.params.breakId, { wifiSSID, admin: false });
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
 };
@@ -39,7 +39,7 @@ const endBreakForEmployee = async (req, res, next) => {
     });
     if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
     const { breakId } = req.params;
-    const record = await BreakService.endBreak(employee.id, breakId, { wifiSSID: req.body?.wifiSSID });
+    const record = await BreakService.endBreak(employee.id, breakId, { wifiSSID: req.body?.wifiSSID, admin: true });
     res.json({ success: true, data: record });
   } catch (err) { next(err); }
 };

@@ -63,7 +63,7 @@ function AddDeptModal({ orgs, onClose, onSaved }: { orgs: any[]; onClose: () => 
 
 function EditPolicyModal({ department, onClose, onSaved }: { department: any; onClose: () => void; onSaved: () => void }) {
   const policy = department.breakPolicy ?? {};
-  const [form, setForm] = useState({ breakStart: policy.breakStart ?? '13:00', breakEnd: policy.breakEnd ?? '14:00', totalDailyBreakLimit: policy.totalDailyBreakLimit ?? 90, maxShortBreaks: policy.maxShortBreaks ?? 2, maxShortBreakMinutes: policy.maxShortBreakMinutes ?? 15, maxLunchMinutes: policy.maxLunchMinutes ?? 60, overstayPenalty: policy.overstayPenalty ?? 100 });
+  const [form, setForm] = useState({ breakStart: policy.breakStart ?? '13:00', breakEnd: policy.breakEnd ?? '14:00', totalDailyBreakLimit: policy.totalDailyBreakLimit ?? 90, maxShortBreaks: policy.maxShortBreaks ?? 2, maxShortBreakMinutes: policy.maxShortBreakMinutes ?? 15, maxLunchMinutes: policy.maxLunchMinutes ?? 60, overstayPenalty: policy.overstayPenalty ?? 50 });
   const [error, setError] = useState(''); const [loading, setLoading] = useState(false);
   const inp = 'w-full border border-[var(--input-border)] bg-[var(--input-bg)] text-[var(--text-main)] rounded-xl px-3 py-2.5 text-sm';
   const save = async () => { setLoading(true); setError(''); try { await updateOrgDepartmentBreakPolicy(department.id, form); onSaved(); onClose(); } catch (err: any) { setError(err?.message ?? 'Failed to update policy'); } finally { setLoading(false); } };
