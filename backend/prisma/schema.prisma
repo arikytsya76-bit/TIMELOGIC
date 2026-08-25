@@ -387,8 +387,6 @@ model SecuritySettings {
   deviceBindingEnabled  Boolean  @default(true)
   screenshotProtection  Boolean  @default(true)
   qrRotationSeconds     Int      @default(30)
-    autoEndAfterMinutes  Int         @default(120)
-    overstayPenalty      Int         @default(50)
   lateThresholdMinutes  Int      @default(15)
   maxFailedAttempts     Int      @default(5)
   autoLockOnFraud       Boolean  @default(true)
@@ -412,6 +410,7 @@ model BreakPolicy {
   maxShortBreakMinutes Int         @default(15)
   totalDailyBreakLimit Int         @default(90)
   autoEndAfterMinutes  Int         @default(120)
+  overstayPenalty      Int         @default(50)
   breakStart           String? // department break window start (HH:MM)
   breakEnd             String? // department break window end (HH:MM)
   requiresApproval     Boolean     @default(false)
@@ -543,10 +542,10 @@ model BreakRecord {
   startTime          DateTime
   endTime            DateTime?
   durationMinutes    Int?
-  isAutoEnded        Boolean   @default(false)
-    notes              String?
-    penalty            Int       @default(0)
-    startedByAdmin     Boolean   @default(false)
+  isAutoEnded         Boolean   @default(false)
+  notes              String?
+  penalty            Int       @default(0)
+  startedByAdmin     Boolean   @default(false)
 
   attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   employee         User             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
