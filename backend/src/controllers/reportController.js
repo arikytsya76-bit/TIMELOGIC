@@ -2,23 +2,26 @@ const ReportService = require('../services/ReportService');
 const { getCurrentServerTime } = require('../utils/networkTime');
 const { dateKey, zonedParts } = require('../utils/attendanceClock');
 
-const LAGOS_TZ = 'Africa/Lagos';
+const DEFAULT_TZ = 'Africa/Lagos';
 
-function formatLagosDate(date) {
-  return dateKey(date, LAGOS_TZ);
+async function organizationTimezone(orgId) {
+  const { prisma } = require('../config/database');
+  const organization = await prisma.organization.findUnique({ where: { id: orgId }, select: { timezone: true } });
+  return organization?.timezone || DEFAULT_TZ;
 }
 
 const serverTime = async (req, res, next) => {
   try {
     const now = await getCurrentServerTime();
+    const timezone = await organizationTimezone(req.user.orgId);
     res.json({
       success: true,
       data: {
         now: now.toISOString(),
         iso: now.toISOString(),
-        timezone: LAGOS_TZ,
+        timezone,
         localTime: new Intl.DateTimeFormat('en-GB', {
-          timeZone: LAGOS_TZ,
+          timeZone: timezone,
           year: 'numeric', month: '2-digit', day: '2-digit',
           hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
         }).format(now),
@@ -40,10 +43,11 @@ const weekly = async (req, res, next) => {
   try {
     // Default weekStart to the most recent Monday
     const now = await getCurrentServerTime();
-    const local = zonedParts(now, LAGOS_TZ);
+    const timezone = await organizationTimezone(req.user.orgId);
+    const local = zonedParts(now, timezone);
     const dayOfWeek = new Date(Date.UTC(local.year, local.month - 1, local.day)).getUTCDay();
     const monday = new Date(Date.UTC(local.year, local.month - 1, local.day - (dayOfWeek === 0 ? 6 : dayOfWeek - 1)));
-    const weekStart = req.query.weekStart || dateKey(monday, 'UTC');
+    const weekStart = req.query.weekStart || dateKey(monday, timezone);
     const result = await ReportService.generateWeekly(weekStart, req.user.id, req.user.orgId);
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
@@ -53,7 +57,8 @@ const monthly = async (req, res, next) => {
   try {
     // Default to current month/year when not provided
     const now = await getCurrentServerTime();
-    const local = zonedParts(now, LAGOS_TZ);
+    const timezone = await organizationTimezone(req.user.orgId);
+    const local = zonedParts(now, timezone);
     const year  = req.query.year  ? +req.query.year  : local.year;
     const month = req.query.month ? +req.query.month : local.month;
     const result = await ReportService.generateMonthly(year, month, req.user.id, req.user.orgId);
@@ -97,9 +102,10 @@ const monthly = async (req, res, next) => {
 const custom = async (req, res, next) => {
   try {
     const now = await getCurrentServerTime();
-    const local = zonedParts(now, LAGOS_TZ);
+    const timezone = await organizationTimezone(req.user.orgId);
+    const local = zonedParts(now, timezone);
     const startDate = req.query.startDate || `${local.year}-${String(local.month).padStart(2, '0')}-01`;
-    const endDate   = req.query.endDate   || dateKey(now, LAGOS_TZ);
+    const endDate   = req.query.endDate   || dateKey(now, timezone);
     const result = await ReportService.generateCustom(startDate, endDate, req.user.id, req.user.orgId);
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
@@ -123,7 +129,7 @@ const byEmployee = async (req, res, next) => {
 
 const exportExcel = async (req, res, next) => {
   try {
-    const today = formatLagosDate(await getCurrentServerTime());
+    const today = dateKey(await getCurrentServerTime(), await organizationTimezone(req.user.orgId));
     // Super Admin (platform-org) gets ALL orgs; regular admin gets only their org
     const exportOrgId = req.user.role === 'SUPER_ADMIN' ? null : req.user.orgId;
     const buffer = await ReportService.exportFullToExcel(exportOrgId);
@@ -136,7 +142,7 @@ const exportExcel = async (req, res, next) => {
 
 const exportCSV = async (req, res, next) => {
   try {
-    const today = formatLagosDate(await getCurrentServerTime());
+    const today = dateKey(await getCurrentServerTime(), await organizationTimezone(req.user.orgId));
     const exportOrgId = req.user.role === 'SUPER_ADMIN' ? null : req.user.orgId;
     const csv = await ReportService.exportFullToCSV(exportOrgId);
     const prefix = req.user.role === 'SUPER_ADMIN' ? 'all-orgs' : 'org';

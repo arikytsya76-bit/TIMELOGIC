@@ -782,7 +782,7 @@ class ReportService {
     const late = [...latestByEmployee.values()].filter((status) => status === 'LATE').length;
     const absent = [...latestByEmployee.values()].filter((status) => status === 'ABSENT').length;
     const attendanceRate = total ? Math.round(((present + late) / total) * 100) : 0;
-    return { total, present, late, onLeave, absent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions, serverDate: today.toISOString().slice(0, 10) };
+    return { total, present, late, onLeave, absent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions, serverDate: today.toISOString().slice(0, 10), timezone: organization?.timezone || 'Africa/Lagos' };
   }
 
   // ── private ──────────────────────────────────────────────────────────────────

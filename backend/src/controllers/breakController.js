@@ -65,7 +65,10 @@ const getDailyBreaks = async (req, res, next) => {
       const records = await prisma.breakRecord.findMany({
         where: {
           employee: { orgId: req.user.orgId },
-          startTime: { gte: bounds.start, lt: bounds.end },
+          OR: [
+            { startTime: { gte: bounds.start, lt: bounds.end } },
+            { endTime: null },
+          ],
         },
         include: {
           employee: {

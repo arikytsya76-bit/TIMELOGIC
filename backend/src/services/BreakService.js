@@ -3,6 +3,7 @@ const { prisma } = require('../config/database');
 const NotificationService = require('./NotificationService');
 const logger = require('../config/logger');
 const { atZonedTime, dayBounds, zonedParts } = require('../utils/attendanceClock');
+const { getCurrentServerTime } = require('../utils/networkTime');
 
 const toMin = (hhmm) => { const [h, m] = hhmm.split(':').map(Number); return h * 60 + m; };
 
@@ -29,7 +30,7 @@ class BreakService {
 
     // ── Enforce the DEPARTMENT's break window (each department has its own) ──
     if (policy?.breakStart && policy?.breakEnd) {
-      const now = new Date();
+      const now = await getCurrentServerTime();
       const local = zonedParts(now, record.session?.office?.timezone || 'Africa/Lagos');
       const nowMin = local.hour * 60 + local.minute;
       if (nowMin < toMin(policy.breakStart) || nowMin > toMin(policy.breakEnd)) {
@@ -40,12 +41,13 @@ class BreakService {
       }
     }
 
-    const todayBreaks = await this.getDailyBreaks(employeeId, new Date());
+    const serverNow = await getCurrentServerTime();
+    const todayBreaks = await this.getDailyBreaks(employeeId, serverNow);
     const check = await this.checkBreakPolicy(employeeId, policy, todayBreaks, breakType);
     if (!check.allowed) throw Object.assign(new Error(check.reason), { status: 400 });
 
     return prisma.breakRecord.create({
-      data: { id: uuidv4(), attendanceRecordId: record.id, employeeId, breakType, startTime: new Date(), notes },
+      data: { id: uuidv4(), attendanceRecordId: record.id, employeeId, breakType, startTime: serverNow, notes },
     });
   }
 
@@ -60,7 +62,7 @@ class BreakService {
     });
     if (!breakRecord) throw Object.assign(new Error('Break not found or already ended'), { status: 404 });
 
-    const endTime = new Date();
+    const endTime = await getCurrentServerTime();
     const durationMinutes = Math.floor((endTime - breakRecord.startTime) / 60000);
 
     const changed = await prisma.breakRecord.updateMany({
