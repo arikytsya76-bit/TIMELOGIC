@@ -74,6 +74,7 @@ class ReportService {
     const orgFilter = orgId && orgId !== 'platform-org' ? { orgId } : {};
     const empOrgFilter = orgId && orgId !== 'platform-org' ? { employee: { orgId } } : {};
     const sessionOrgFilter = orgId && orgId !== 'platform-org' ? { office: { orgId } } : {};
+    const scanOrgFilter = orgId && orgId !== 'platform-org' ? { employee: { orgId } } : {};
     const scopedOrgId = orgId && orgId !== 'platform-org' ? orgId : null;
     const scopedUserIds = scopedOrgId
       ? (await prisma.user.findMany({ where: { orgId: scopedOrgId }, select: { id: true } })).map((user) => user.id)
@@ -174,7 +175,7 @@ class ReportService {
         orderBy: { startTime: 'desc' },
       }),
       prisma.scanAttempt.findMany({
-        where: sessionOrgFilter,
+        where: scanOrgFilter,
         include: {
           employee: { select: { firstName: true, lastName: true, employeeCode: true, organization: { select: { name: true } } } },
           session: { select: { sessionName: true, startTime: true } },
@@ -781,8 +782,7 @@ class ReportService {
     const late = [...latestByEmployee.values()].filter((status) => status === 'LATE').length;
     const absent = [...latestByEmployee.values()].filter((status) => status === 'ABSENT').length;
     const attendanceRate = total ? Math.round(((present + late) / total) * 100) : 0;
-    const calculatedAbsent = Math.max(absent, total - present - late - onLeave);
-    return { total, present, late, onLeave, absent: calculatedAbsent, notRecorded: Math.max(0, total - present - late - onLeave - calculatedAbsent), attendanceRate, flagged, openAlerts, activeSessions, serverDate: today.toISOString().slice(0, 10) };
+    return { total, present, late, onLeave, absent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions, serverDate: today.toISOString().slice(0, 10) };
   }
 
   // ── private ──────────────────────────────────────────────────────────────────
