@@ -144,7 +144,7 @@ export default function Break({ initial, onBack }: { initial: BreakType; onBack:
             className="flex w-full items-center justify-center gap-2.5 rounded-[14px] border-2 border-danger bg-danger-bg py-4 font-bold text-danger disabled:opacity-60"
           >
             {busy ? <Loader2 size={20} className="spin" /> : <StopCircle size={20} />}
-            {busy ? "Ending…" : "End Break"}
+            {busy ? "Ending…" : "Break Over"}
           </button>
         )}
       </div>

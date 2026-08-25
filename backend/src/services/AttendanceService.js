@@ -308,16 +308,9 @@ class AttendanceService {
         JSON.stringify({ onWifi, ssid: got || null, at: Date.now() }), 'EX', 180);
     } catch (_) { /* presence is best-effort */ }
 
-    // On break AND back on the office Wi-Fi → end the break (returned legitimately)
+    // Returning to Wi-Fi does not end a break. The employee must press Break Over
+    // so the exact return time and any overstay penalty are recorded.
     let breakEnded = false;
-    if (onWifi) {
-      const BreakService = require('./BreakService');
-      const active = await BreakService.getActiveBreak(employeeId);
-      if (active) {
-        await BreakService.endBreak(employeeId, active.id, { wifiSSID: got });
-        breakEnded = true;
-      }
-    }
     return { tracked: true, onWifi, breakEnded };
   }
 

@@ -188,7 +188,7 @@ export default function BreakScreen() {
           >
             {ending ? <ActivityIndicator color={C.danger} /> : <Ionicons name="stop-circle-outline" size={20} color={C.danger} />}
             <Text style={[styles.endBtnText, { color: C.danger }]}>
-              {ending ? 'Ending...' : 'End Break'}
+              {ending ? 'Ending...' : 'Break Over'}
             </Text>
           </TouchableOpacity>
         )}

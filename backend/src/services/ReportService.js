@@ -322,6 +322,7 @@ class ReportService {
         Start: b.startTime ? this._fmtTime(b.startTime) : '',
         End: b.endTime ? this._fmtTime(b.endTime) : 'Active',
         'Duration (min)': b.durationMinutes ?? '',
+        'Penalty (NGN)': b.penalty ?? 0,
         'Auto-Ended': b.isAutoEnded ? 'Yes' : 'No',
         'Session': b.attendanceRecord?.session?.sessionName ?? '',
         'Attendance Date': isoDate(b.attendanceRecord?.date),
@@ -522,7 +523,7 @@ class ReportService {
       ]));
 
     addSection('BREAK RECORDS',
-      ['Organization', 'Employee Code', 'Employee Name', 'Break Type', 'Start', 'End', 'Duration (min)', 'Auto-Ended', 'Session', 'Attendance Date'],
+      ['Organization', 'Employee Code', 'Employee Name', 'Break Type', 'Start', 'End', 'Duration (min)', 'Penalty (NGN)', 'Auto-Ended', 'Session', 'Attendance Date'],
       data.breakRecords.map((b) => [
         b.employee?.organization?.name ?? '',
         b.employee?.employeeCode ?? '',
@@ -531,6 +532,7 @@ class ReportService {
         b.startTime ? this._fmtTime(b.startTime) : '',
         b.endTime ? this._fmtTime(b.endTime) : 'Active',
         b.durationMinutes ?? '',
+        b.penalty ?? 0,
         b.isAutoEnded ? 'Yes' : 'No',
         b.attendanceRecord?.session?.sessionName ?? '',
         isoDate(b.attendanceRecord?.date),

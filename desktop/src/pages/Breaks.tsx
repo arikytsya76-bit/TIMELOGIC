@@ -24,6 +24,8 @@ export default function Breaks() {
   const [starting, setStarting] = useState<string | null>(null);
   const [employees, setEmployees] = useState<any[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('');
+  const takenEmployeeIds = new Set(breaks.map((item) => item.employeeId));
+  const isToday = Boolean(serverNow && date === serverNow.toLocaleDateString('en-CA', { timeZone: organizationTimezone }));
 
   const load = () => { setLoading(true); fetchDailyBreaks(date).then(setBreaks).finally(() => setLoading(false)); };
   useEffect(() => {
@@ -48,10 +50,10 @@ export default function Breaks() {
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
           <select value={selectedEmployee} onChange={(e) => setSelectedEmployee(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
             <option value="">Select employee for admin break</option>
-            {employees.filter((e) => e.status === 'ACTIVE').map((e) => <option key={e.id} value={e.id}>{e.firstName} {e.lastName} ({e.department?.name ?? 'No department'})</option>)}
+            {employees.filter((e) => e.status === 'ACTIVE').map((e) => <option key={e.id} value={e.id} disabled={takenEmployeeIds.has(e.id)}>{e.firstName} {e.lastName} ({e.department?.name ?? 'No department'}){takenEmployeeIds.has(e.id) ? ' — break already recorded today' : ''}</option>)}
           </select>
-          <button disabled={!selectedEmployee || !!starting} onClick={() => startFor(selectedEmployee, 'LUNCH')} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-primary-700 text-white text-sm font-semibold disabled:opacity-50"><Play size={14} />Take lunch</button>
-          <button disabled={!selectedEmployee || !!starting} onClick={() => startFor(selectedEmployee, 'SHORT_BREAK')} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold disabled:opacity-50">Take short break</button>
+          <button disabled={!isToday || !selectedEmployee || takenEmployeeIds.has(selectedEmployee) || !!starting} onClick={() => startFor(selectedEmployee, 'LUNCH')} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-primary-700 text-white text-sm font-semibold disabled:opacity-50"><Play size={14} />Take lunch</button>
+          <button disabled={!isToday || !selectedEmployee || takenEmployeeIds.has(selectedEmployee) || !!starting} onClick={() => startFor(selectedEmployee, 'SHORT_BREAK')} className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold disabled:opacity-50">Take short break</button>
         </div>
         {loading ? <Spinner /> : (
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
@@ -84,16 +86,16 @@ export default function Breaks() {
                     <td className="px-4 py-3 font-medium text-slate-800">{fmt(b.startTime, b.employee?.organization?.timezone)}</td>
                     <td className="px-4 py-3 font-medium text-slate-800">{b.endTime ? fmt(b.endTime, b.employee?.organization?.timezone) : <span className="text-emerald-600 font-semibold text-xs">Active</span>}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">{b.employee?.department?.breakPolicy?.breakStart && b.employee?.department?.breakPolicy?.breakEnd ? `${b.employee.department.breakPolicy.breakStart} - ${b.employee.department.breakPolicy.breakEnd}` : 'Any time'}</td>
-                    <td className="px-4 py-3 font-bold text-slate-700">{b.durationMinutes ?? '—'}m</td>
+                    <td className="px-4 py-3 font-bold text-slate-700">{b.durationMinutes ?? '—'}m {b.penalty > 0 && <span className="block text-xs text-red-600">Penalty ₦{Number(b.penalty).toLocaleString()}</span>}</td>
                     <td className="px-4 py-3">
                       {b.isAutoEnded
                         ? <div className="flex items-center gap-1 text-orange-600"><AlertCircle size={13} /><span className="text-xs font-semibold">Auto-ended</span></div>
-                        : b.endTime ? <span className="text-xs font-semibold text-emerald-600">Normal</span>
+                        : b.endTime ? <span className={`text-xs font-semibold ${b.penalty > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.penalty > 0 ? 'Overtime penalty' : 'Normal'}</span>
                         : <span className="text-xs font-semibold text-primary-600">In progress</span>
                       }
                     </td>
                     <td className="px-4 py-3">
-                      {!b.endTime && <span className="text-xs text-slate-500">Active</span>}
+                      {!b.endTime && <span className="text-xs text-slate-500">Waiting for employee</span>}
                       {b.endTime && <button disabled={starting === b.employee?.id} onClick={() => startFor(b.employee.id, 'SHORT_BREAK')} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 text-primary-700 text-xs font-semibold disabled:opacity-50"><Play size={12} />{starting === b.employee?.id ? 'Starting...' : 'Start break'}</button>}
                     </td>
                   </tr>

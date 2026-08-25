@@ -63,13 +63,7 @@ const getDailyBreaks = async (req, res, next) => {
       const bounds = dayBounds(requested, organization?.timezone || 'Africa/Lagos');
 
       const records = await prisma.breakRecord.findMany({
-        where: {
-          employee: { orgId: req.user.orgId },
-          OR: [
-            { startTime: { gte: bounds.start, lt: bounds.end } },
-            { endTime: null },
-          ],
-        },
+        where: { employee: { orgId: req.user.orgId }, startTime: { gte: bounds.start, lt: bounds.end } },
         include: {
           employee: {
             select: {

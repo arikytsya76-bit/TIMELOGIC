@@ -15,6 +15,13 @@ class BreakService {
     }));
   }
 
+  _overstayPenalty(startTime, endTime, policy, timezone) {
+    if (!policy?.breakEnd || !endTime) return 0;
+    const windowEnd = atZonedTime(startTime, policy.breakEnd, timezone);
+    if (!windowEnd || endTime.getTime() <= windowEnd.getTime() + 10 * 60_000) return 0;
+    return Number(policy.overstayPenalty) || 0;
+  }
+
   async startBreak(employeeId, breakType, notes = null) {
     const record = await prisma.attendanceRecord.findFirst({
       where: { employeeId, clockInTime: { not: null }, clockOutTime: null },
@@ -43,6 +50,9 @@ class BreakService {
 
     const serverNow = await getCurrentServerTime();
     const todayBreaks = await this.getDailyBreaks(employeeId, serverNow);
+    if (todayBreaks.length > 0) {
+      throw Object.assign(new Error('Only one break is allowed per employee per day. The existing break must be ended before it is recorded.'), { status: 400 });
+    }
     const check = await this.checkBreakPolicy(employeeId, policy, todayBreaks, breakType);
     if (!check.allowed) throw Object.assign(new Error(check.reason), { status: 400 });
 
@@ -65,9 +75,12 @@ class BreakService {
     const endTime = await getCurrentServerTime();
     const durationMinutes = Math.floor((endTime - breakRecord.startTime) / 60000);
 
+    const policy = await this._getPolicy(employeeId);
+    const timezone = breakRecord.attendanceRecord?.session?.office?.timezone || 'Africa/Lagos';
+    const penalty = this._overstayPenalty(breakRecord.startTime, endTime, policy, timezone);
     const changed = await prisma.breakRecord.updateMany({
       where: { id: breakId, employeeId, endTime: null },
-      data: { endTime, durationMinutes },
+      data: { endTime, durationMinutes, penalty },
     });
     if (!changed.count) throw Object.assign(new Error('Break is already ended'), { status: 409 });
     const updated = await prisma.breakRecord.findUnique({ where: { id: breakId } });
@@ -85,7 +98,6 @@ class BreakService {
         { durationMinutes, gotWifi: ctx.wifiSSID, expectedWifi: officeWifi });
     }
 
-    const policy = await this._getPolicy(employeeId);
     if (policy && durationMinutes > policy.totalDailyBreakLimit) {
       await this._raiseFraud(employeeId, breakRecord.attendanceRecord.sessionId, 'OVERSTAYED_BREAK',
         `Break of ${durationMinutes} min exceeded the daily limit of ${policy.totalDailyBreakLimit} min.`,
@@ -123,44 +135,9 @@ class BreakService {
     return { allowed: true };
   }
 
-  // Runs from the scheduler: any break that runs past its department window end (or
-  // the policy auto-end fallback) is force-ended AND flagged as an overstay fraud.
+  // Breaks stay active until the employee records the real return time.
   async autoEndOverdueBreaks() {
-    const active = await prisma.breakRecord.findMany({
-      where: { endTime: null },
-      include: {
-        attendanceRecord: { select: { sessionId: true, session: { select: { office: { select: { timezone: true } } } } } },
-        employee: { select: { department: { select: { breakPolicy: { select: { breakEnd: true, autoEndAfterMinutes: true } } } } } },
-      },
-    });
-
-    const now = new Date();
-    let count = 0;
-    for (const b of active) {
-      const pol = b.employee?.department?.breakPolicy;
-      const autoAfter = pol?.autoEndAfterMinutes ?? 120;
-
-      // Hard deadline = the department breakEnd today, or startTime + autoAfter, whichever is sooner.
-      let deadline = new Date(b.startTime.getTime() + autoAfter * 60000);
-      if (pol?.breakEnd) {
-        let d = atZonedTime(b.startTime, pol.breakEnd, b.attendanceRecord?.session?.office?.timezone || 'Africa/Lagos');
-        if (d < b.startTime) d = atZonedTime(b.startTime, pol.breakEnd, b.attendanceRecord?.session?.office?.timezone || 'Africa/Lagos', 1);
-        if (d < deadline) deadline = d;
-      }
-      if (now <= deadline) continue;
-
-      const durationMinutes = Math.max(1, Math.floor((deadline - b.startTime) / 60000));
-      await prisma.breakRecord.update({ where: { id: b.id }, data: { endTime: deadline, durationMinutes, isAutoEnded: true } });
-      await prisma.attendanceRecord.update({ where: { id: b.attendanceRecordId }, data: { totalBreakMinutes: { increment: durationMinutes } } });
-      if (b.attendanceRecord?.sessionId) {
-        await this._raiseFraud(b.employeeId, b.attendanceRecord.sessionId, 'OVERSTAYED_BREAK',
-          `Did not return from break on time. Break auto-ended after ${durationMinutes} min${pol?.breakEnd ? ` (window closed ${pol.breakEnd})` : ''}.`,
-          { durationMinutes, autoEnded: true });
-      }
-      count++;
-      logger.info(`Auto-ended overstayed break ${b.id} for employee ${b.employeeId}`);
-    }
-    return count;
+    return 0;
   }
 
   async _raiseFraud(employeeId, sessionId, fraudType, description, evidence) {

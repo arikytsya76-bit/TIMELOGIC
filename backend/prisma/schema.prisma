@@ -387,7 +387,8 @@ model SecuritySettings {
   deviceBindingEnabled  Boolean  @default(true)
   screenshotProtection  Boolean  @default(true)
   qrRotationSeconds     Int      @default(30)
-  maxDevicesPerEmployee Int      @default(2)
+    autoEndAfterMinutes  Int         @default(120)
+    overstayPenalty      Int         @default(100)
   lateThresholdMinutes  Int      @default(15)
   maxFailedAttempts     Int      @default(5)
   autoLockOnFraud       Boolean  @default(true)
@@ -543,7 +544,8 @@ model BreakRecord {
   endTime            DateTime?
   durationMinutes    Int?
   isAutoEnded        Boolean   @default(false)
-  notes              String?
+    notes              String?
+    penalty            Int       @default(0)
 
   attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
   employee         User             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
