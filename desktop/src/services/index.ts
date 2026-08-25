@@ -104,6 +104,7 @@ export const rejectLeave        = (id: string, reason: string) => api.put<any>(`
 // ─── Breaks ──────────────────────────────────────────────────────────────────
 export const fetchDailyBreaks  = (date?: string) => api.get<any>(`/breaks/daily${date ? `?date=${encodeURIComponent(date)}` : ''}`).then((r) => r.data ?? []);
 export const startEmployeeBreak = (employeeId: string, breakType: string, notes?: string) => api.post<any>(`/admin/breaks/${employeeId}/start`, { breakType, notes }).then((r) => r.data);
+export const endEmployeeBreak = (employeeId: string, breakId: string) => api.put<any>(`/admin/breaks/${employeeId}/${breakId}/end`, {}).then((r) => r.data);
 
 // ─── Fraud Alerts ────────────────────────────────────────────────────────────
 export const fetchAlerts      = () => api.get<any>('/fraud').then((r) => r.data ?? []);

@@ -114,6 +114,7 @@ router.put('/departments/:departmentId/break-policy', authenticate, isAdmin, ctr
 router.post('/breaks/:employeeId/start', authenticate, isAdmin, [
   body('breakType').isIn(['LUNCH', 'SHORT_BREAK', 'PRAYER', 'PERSONAL', 'NURSING']),
 ], validate, require('../controllers/breakController').startBreakForEmployee);
+router.put('/breaks/:employeeId/:breakId/end', authenticate, isAdmin, require('../controllers/breakController').endBreakForEmployee);
 
 // Emergency
 router.post('/emergency/stop-all', authenticate, isAdmin, [

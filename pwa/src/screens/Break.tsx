@@ -17,7 +17,11 @@ export default function Break({ initial, onBack }: { initial: BreakType; onBack:
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    getActiveBreak().then((b) => setActive(b)).catch(() => {}).finally(() => setReady(true));
+    let mounted = true;
+    const refresh = () => getActiveBreak().then((b) => { if (mounted) setActive(b); }).catch(() => {}).finally(() => { if (mounted) setReady(true); });
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => { mounted = false; clearInterval(timer); };
   }, []);
 
   const current = active ? BREAK_TYPES.find((b) => b.type === active.breakType) ?? selected : selected;

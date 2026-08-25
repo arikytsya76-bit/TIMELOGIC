@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertCircle, Play } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchDailyBreaks, startEmployeeBreak, fetchEmployees } from '../services';
+import { fetchDailyBreaks, startEmployeeBreak, endEmployeeBreak, fetchEmployees } from '../services';
 import { useAuth } from '../context/AuthContext';
 
 const BREAK_COLORS: Record<string, string> = {
@@ -36,6 +36,12 @@ export default function Breaks() {
     setStarting(employeeId);
     try { await startEmployeeBreak(employeeId, breakType, 'Started by organization admin'); load(); }
     catch (err: any) { alert(err?.message ?? 'Could not start break.'); }
+    finally { setStarting(null); }
+  };
+  const endFor = async (employeeId: string, breakId: string) => {
+    setStarting(employeeId);
+    try { await endEmployeeBreak(employeeId, breakId); load(); }
+    catch (err: any) { alert(err?.message ?? 'Could not end break.'); }
     finally { setStarting(null); }
   };
 
@@ -90,12 +96,12 @@ export default function Breaks() {
                     <td className="px-4 py-3">
                       {b.isAutoEnded
                         ? <div className="flex items-center gap-1 text-orange-600"><AlertCircle size={13} /><span className="text-xs font-semibold">Auto-ended</span></div>
-                        : b.endTime ? <span className={`text-xs font-semibold ${b.penalty > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.penalty > 0 ? 'Overtime penalty' : 'Normal'}</span>
+                        : b.endTime ? <span className={`text-xs font-semibold ${b.penalty > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{b.penalty > 0 ? 'Overstayed breaktime' : 'Normal'}</span>
                         : <span className="text-xs font-semibold text-primary-600">In progress</span>
                       }
                     </td>
                     <td className="px-4 py-3">
-                      {!b.endTime && <span className="text-xs text-slate-500">Waiting for employee</span>}
+                      {!b.endTime && <button disabled={starting === b.employee?.id} onClick={() => endFor(b.employee.id, b.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-50 text-red-700 text-xs font-semibold disabled:opacity-50">{starting === b.employee?.id ? 'Ending...' : 'End break'}</button>}
                       {b.endTime && <button disabled={starting === b.employee?.id} onClick={() => startFor(b.employee.id, 'SHORT_BREAK')} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary-50 text-primary-700 text-xs font-semibold disabled:opacity-50"><Play size={12} />{starting === b.employee?.id ? 'Starting...' : 'Start break'}</button>}
                     </td>
                   </tr>
