@@ -50,7 +50,7 @@ const ACTIONS = [
 ];
 
 export default function Emergency() {
-  const { user } = useAuth();
+  const { user, currentTime, organizationTimezone } = useAuth();
   const [log, setLog] = useState<ActionLog[]>([]);
   const [modal, setModal] = useState<typeof ACTIONS[0] | null>(null);
   const [reason, setReason] = useState('');
@@ -76,7 +76,7 @@ export default function Emergency() {
       label: modal.label,
       reason,
       by: `${user?.firstName} ${user?.lastName}`,
-      at: new Date().toLocaleString(),
+      at: currentTime()?.toLocaleString('en-GB', { timeZone: organizationTimezone }) ?? 'Server time unavailable',
       isReverted: false,
       status: 'pending',
     };

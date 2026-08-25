@@ -748,11 +748,11 @@ class ReportService {
     return Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
   }
 
-  async getDashboardLiveStats(orgId) {
+  async getDashboardLiveStats(orgId, serverNow = new Date()) {
     const organization = await prisma.organization.findUnique({
       where: { id: orgId }, select: { timezone: true },
     });
-    const today = dateOnly(new Date(), organization?.timezone || 'Africa/Lagos');
+    const today = dateOnly(serverNow, organization?.timezone || 'Africa/Lagos');
 
     const orgEmployees = await prisma.user.findMany({
       where: { orgId, role: 'EMPLOYEE', status: 'ACTIVE' },
@@ -765,6 +765,7 @@ class ReportService {
       prisma.attendanceRecord.findMany({
         where: { employeeId: { in: empIds }, date: today },
         select: { employeeId: true, status: true },
+        orderBy: { createdAt: 'desc' },
       }),
       prisma.leaveRequest.count({ where: { employeeId: { in: empIds }, status: 'APPROVED', startDate: { lte: today }, endDate: { gte: today } } }),
       prisma.attendanceRecord.count({ where: { employeeId: { in: empIds }, date: today, flagged: true } }),
@@ -772,12 +773,16 @@ class ReportService {
       prisma.attendanceSession.count({ where: { office: { orgId }, status: { in: ['ACTIVE', 'PAUSED'] } } }),
     ]);
 
-    const present = todayRecords.filter((record) => record.status === 'PRESENT').length;
-    const late = todayRecords.filter((record) => record.status === 'LATE').length;
-    const absent = todayRecords.filter((record) => record.status === 'ABSENT').length;
+    const latestByEmployee = new Map();
+    for (const record of todayRecords) {
+      if (!latestByEmployee.has(record.employeeId)) latestByEmployee.set(record.employeeId, record.status);
+    }
+    const present = [...latestByEmployee.values()].filter((status) => status === 'PRESENT').length;
+    const late = [...latestByEmployee.values()].filter((status) => status === 'LATE').length;
+    const absent = [...latestByEmployee.values()].filter((status) => status === 'ABSENT').length;
     const attendanceRate = total ? Math.round(((present + late) / total) * 100) : 0;
     const calculatedAbsent = Math.max(absent, total - present - late - onLeave);
-    return { total, present, late, onLeave, absent: calculatedAbsent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions };
+    return { total, present, late, onLeave, absent: calculatedAbsent, notRecorded: Math.max(0, total - present - late - onLeave - calculatedAbsent), attendanceRate, flagged, openAlerts, activeSessions, serverDate: today.toISOString().slice(0, 10) };
   }
 
   // ── private ──────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Plus, Pause, Square, Lock, RefreshCw, QrCode, Clock, Users } from 'lucide-react';
 import Header from '../components/Header';
 import { fetchSessions, createSession, pauseSession, resumeSession, endSession, lockSession, refreshQR } from '../services';
+import { useAuth } from '../context/AuthContext';
 
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE:    'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30',
@@ -29,12 +30,14 @@ function formatOfficeTime(value: string | null | undefined, timezone?: string | 
   }
 }
 
-function CountdownTimer({ endTime }: { endTime: string | null }) {
+function CountdownTimer({ endTime, currentTime }: { endTime: string | null; currentTime: () => Date | null }) {
   const [remaining, setRemaining] = useState('');
   useEffect(() => {
     if (!endTime) return;
     const tick = () => {
-      const diff = new Date(endTime).getTime() - Date.now();
+      const now = currentTime();
+      if (!now) return;
+      const diff = new Date(endTime).getTime() - now.getTime();
       if (diff <= 0) { setRemaining('Expiring...'); return; }
       const m = Math.floor(diff / 60000);
       const s = Math.floor((diff % 60000) / 1000);
@@ -48,6 +51,7 @@ function CountdownTimer({ endTime }: { endTime: string | null }) {
 }
 
 export default function Sessions() {
+  const { currentTime } = useAuth();
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -147,7 +151,7 @@ export default function Sessions() {
                       <span>{s.office?.name ?? 'Office'}</span>
                       <span className="flex items-center gap-1"><Clock size={11} />QR every {s.qrRefreshInterval}s</span>
                       <span className="flex items-center gap-1"><Users size={11} />{s._count?.attendanceRecords ?? 0} checked in</span>
-                      {s.status === 'ACTIVE' && s.endTime && <CountdownTimer endTime={s.endTime} />}
+                      {s.status === 'ACTIVE' && s.endTime && <CountdownTimer endTime={s.endTime} currentTime={currentTime} />}
                       {s.endTime && <span>Ends {formatOfficeTime(s.endTime, s.office?.timezone || 'Africa/Lagos')}</span>}
                       {s.office?.openTime && <span>Check-in from {s.office.openTime} until {s.office.lateAfterMinutes ?? 40}m after opening</span>}
                       {s.office?.closeTime && <span>Checkout after {s.office.closeTime}</span>}

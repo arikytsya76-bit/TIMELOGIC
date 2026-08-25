@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AlertCircle, Play } from 'lucide-react';
 import Header from '../components/Header';
 import { fetchDailyBreaks, startEmployeeBreak, fetchEmployees } from '../services';
+import { useAuth } from '../context/AuthContext';
 
 const BREAK_COLORS: Record<string, string> = {
   LUNCH: 'bg-orange-100 text-orange-700',
@@ -16,15 +17,19 @@ function Spinner() {
 }
 
 export default function Breaks() {
+  const { serverNow, organizationTimezone } = useAuth();
   const [breaks, setBreaks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState('');
   const [starting, setStarting] = useState<string | null>(null);
   const [employees, setEmployees] = useState<any[]>([]);
   const [selectedEmployee, setSelectedEmployee] = useState('');
 
   const load = () => { setLoading(true); fetchDailyBreaks(date).then(setBreaks).finally(() => setLoading(false)); };
-  useEffect(() => { load(); fetchEmployees().then(setEmployees).catch(() => {}); }, [date]);
+  useEffect(() => {
+    if (!date && serverNow) setDate(serverNow.toLocaleDateString('en-CA', { timeZone: organizationTimezone }));
+  }, [date, serverNow, organizationTimezone]);
+  useEffect(() => { if (!date) return; load(); fetchEmployees().then(setEmployees).catch(() => {}); }, [date]);
   const startFor = async (employeeId: string, breakType: string) => {
     setStarting(employeeId);
     try { await startEmployeeBreak(employeeId, breakType, 'Started by organization admin'); load(); }

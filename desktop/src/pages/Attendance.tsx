@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Search, AlertTriangle, Wifi, Smartphone, Flag, UserCheck, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
 import { fetchLiveAttendance, fetchAttendanceHistory, flagRecord, approveRecord } from '../services';
+import { useAuth } from '../context/AuthContext';
 
 const STATUS_STYLE: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
@@ -22,13 +23,14 @@ function recorderName(recorder: any) {
 }
 
 export default function Attendance() {
+  const { serverNow, organizationTimezone } = useAuth();
   const [records, setRecords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
   const [view, setView] = useState<'today' | 'past'>('today');
-  const [pastDate, setPastDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pastDate, setPastDate] = useState('');
 
   const load = async () => {
     try {
@@ -43,7 +45,10 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-  useEffect(() => { void load(); if (view !== 'today') return; const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [view, pastDate]);
+  useEffect(() => {
+    if (!pastDate && serverNow) setPastDate(serverNow.toLocaleDateString('en-CA', { timeZone: organizationTimezone }));
+  }, [pastDate, serverNow, organizationTimezone]);
+  useEffect(() => { if (view === 'today' || pastDate) void load(); if (view !== 'today') return; const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [view, pastDate]);
 
   const filtered = records.filter((r) => {
     const matchSearch = `${r.employee?.firstName} ${r.employee?.lastName} ${r.employee?.employeeCode}`.toLowerCase().includes(search.toLowerCase());

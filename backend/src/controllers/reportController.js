@@ -148,7 +148,9 @@ const exportCSV = async (req, res, next) => {
 
 const liveStats = async (req, res, next) => {
   try {
-    const stats = await ReportService.getDashboardLiveStats(req.user.orgId);
+    const now = await getCurrentServerTime();
+    const stats = await ReportService.getDashboardLiveStats(req.user.orgId, now);
+    stats.serverTime = now.toISOString();
     res.json({ success: true, data: stats });
   } catch (err) { next(err); }
 };

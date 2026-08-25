@@ -8,6 +8,9 @@ interface AuthCtx {
   loading: boolean;
   login: (identifier: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
+  serverNow: Date | null;
+  organizationTimezone: string;
+  currentTime: () => Date | null;
 }
 
 const AuthContext = createContext<AuthCtx>({
@@ -16,6 +19,9 @@ const AuthContext = createContext<AuthCtx>({
   loading: true,
   login: async () => ({ ok: false, error: 'Authentication is unavailable.' }),
   logout: () => {},
+  serverNow: null,
+  organizationTimezone: 'Africa/Lagos',
+  currentTime: () => null,
 });
 
 function normalizeUser(raw: AdminUser): AdminUser {
@@ -37,6 +43,17 @@ function normalizeUser(raw: AdminUser): AdminUser {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [serverNow, setServerNow] = useState<Date | null>(null);
+  const [serverNowAt, setServerNowAt] = useState(0);
+
+  const syncServerTime = async () => {
+    const response = await api.get<{ success: boolean; data?: { now?: string } }>('/reports/server-time');
+    const next = response.data?.now ? new Date(response.data.now) : null;
+    if (next && !Number.isNaN(next.getTime())) {
+      setServerNow(next);
+      setServerNowAt(Date.now());
+    }
+  };
 
   // Restore session on mount
   useEffect(() => {
@@ -79,10 +96,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     const timer = window.setInterval(() => void refreshUser(), 30_000);
     const onFocus = () => void refreshUser();
+    const clockTimer = window.setInterval(() => void syncServerTime().catch(() => {}), 30_000);
+    void syncServerTime().catch(() => {});
     window.addEventListener('focus', onFocus);
     return () => {
       active = false;
       window.clearInterval(timer);
+      window.clearInterval(clockTimer);
       window.removeEventListener('focus', onFocus);
     };
   }, [user?.id]);
@@ -113,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.setItem('refreshToken', res.data.refreshToken);
 
       setUser(normalizeUser(res.data.user));
+      void syncServerTime().catch(() => {});
       return { ok: true };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to sign in.';
@@ -133,7 +154,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     localStorage.removeItem('refreshToken');
     setUser(null);
+    setServerNow(null);
+    setServerNowAt(0);
   };
+
+  const currentTime = () => serverNow ? new Date(serverNow.getTime() + Math.max(0, Date.now() - serverNowAt)) : null;
 
   return (
     <AuthContext.Provider value={{
@@ -142,6 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       login,
       logout,
+      serverNow,
+      organizationTimezone: user?.organization?.timezone || 'Africa/Lagos',
+      currentTime,
     }}>
       {children}
     </AuthContext.Provider>

@@ -3,6 +3,7 @@ import { Users, CheckCircle, Clock, XCircle, AlertTriangle, ShieldAlert, Activit
 import Header from '../components/Header';
 import StatCard from '../components/StatCard';
 import { fetchLiveStats, fetchAlerts, fetchPlanInfo } from '../services';
+import { useAuth } from '../context/AuthContext';
 
 const STATUS_COLORS: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
@@ -22,11 +23,14 @@ const PLAN_COLORS: Record<string, string> = {
 };
 
 export default function Dashboard() {
+  const { serverNow, organizationTimezone } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [alerts, setAlerts] = useState<any[]>([]);
   const [plan, setPlan] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const today = serverNow
+    ? serverNow.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: organizationTimezone })
+    : 'Loading current time...';
 
   const load = () => {
     Promise.all([fetchLiveStats(), fetchAlerts(), fetchPlanInfo().catch(() => null)])
