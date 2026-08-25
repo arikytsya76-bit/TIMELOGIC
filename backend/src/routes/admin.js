@@ -68,6 +68,7 @@ router.put('/users/:userId', authenticate, isAdmin, [
   body('checkInMethod').optional().isIn(['PHONE', 'MANUAL', 'BOTH']),
   body('phone').optional({ nullable: true }).isString(),
 ], validate, ctrl.updateUser);
+router.get('/users/:userId/summary', authenticate, isAdmin, ctrl.employeeSummary);
 router.put('/users/:userId/suspend', authenticate, isAdmin, ctrl.suspendUser);
 router.post('/users/:userId/reset-device', authenticate, isAdmin, ctrl.resetDevice);
 router.delete('/users/:userId', authenticate, isAdmin, ctrl.deleteEmployee);

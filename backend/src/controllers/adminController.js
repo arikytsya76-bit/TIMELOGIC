@@ -400,6 +400,21 @@ const deleteEmployee = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const employeeSummary = async (req, res, next) => {
+  try {
+    const employee = await prisma.user.findFirst({
+      where: { id: req.params.userId, orgId: req.user.orgId, role: 'EMPLOYEE' },
+      select: { id: true },
+    });
+    if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    const [penalties, attendanceCount] = await Promise.all([
+      prisma.attendanceRecord.aggregate({ where: { employeeId: employee.id }, _sum: { penalty: true } }),
+      prisma.attendanceRecord.count({ where: { employeeId: employee.id } }),
+    ]);
+    res.json({ success: true, data: { totalPenalty: penalties._sum.penalty ?? 0, attendanceCount } });
+  } catch (err) { next(err); }
+};
+
 // POST /api/admin/users/:userId/reset-device
 // Frees an employee's device binding so they can sign in on a NEW phone. The
 // first device used after this becomes their bound device; the old one is
@@ -451,7 +466,7 @@ module.exports = {
   getOrg, updateOrg,
   createOffice,
   createDepartment,
-  listUsers, updateUser, suspendUser, deleteEmployee, resetDevice,
+  listUsers, updateUser, suspendUser, deleteEmployee, employeeSummary, resetDevice,
   getSecuritySettings, updateSecuritySettings,
   setBreakPolicy,
   emergencyStopAll, emergencyLockSystem, emergencyInvalidateQR, emergencyRevert,

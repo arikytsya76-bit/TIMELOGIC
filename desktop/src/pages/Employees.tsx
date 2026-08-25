@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Search, UserPlus, Smartphone, X, Eye, Camera, Pencil, Settings2 } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchEmployees, createEmployee, updateEmployee, suspendUser, activateUser, deleteEmployee, resetDevice, fetchDepartments, fetchPlanInfo } from '../services';
+import { fetchEmployees, createEmployee, updateEmployee, suspendUser, activateUser, deleteEmployee, resetDevice, fetchDepartments, fetchPlanInfo, fetchEmployeeSummary } from '../services';
 import { API_URL, SOCKET_URL } from '../config';
 import { getToken, authenticatedFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -206,6 +206,7 @@ function EditCheckInMethodModal({
 
 function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any; onClose: () => void; onRefresh: () => void }) {
   const [emp, setEmp] = useState(initialEmp);
+  const [summary, setSummary] = useState<{ totalPenalty: number; attendanceCount: number } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [imgError, setImgError] = useState(false);
   // Stable cache-bust version — only increments when a new photo is uploaded
@@ -213,7 +214,10 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Sync if parent refreshes and passes new data
-  React.useEffect(() => { setEmp(initialEmp); setImgError(false); }, [initialEmp]);
+  React.useEffect(() => {
+    setEmp(initialEmp); setImgError(false); setSummary(null);
+    fetchEmployeeSummary(initialEmp.id).then(setSummary).catch(() => setSummary({ totalPenalty: 0, attendanceCount: 0 }));
+  }, [initialEmp]);
 
   const uploadFace = async (file: File) => {
     const token = getToken();
@@ -260,6 +264,7 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     { label: 'Last Login',         value: emp.lastLoginAt ? new Date(emp.lastLoginAt).toLocaleString() : 'Never' },
     { label: 'Joined',             value: new Date(emp.createdAt).toLocaleDateString('en-GB') },
     { label: 'Registered Devices', value: String(emp._count?.devices ?? 0) },
+    { label: 'Total Penalty', value: summary ? `₦${summary.totalPenalty.toLocaleString()}` : 'Loading...' },
   ];
 
   return (

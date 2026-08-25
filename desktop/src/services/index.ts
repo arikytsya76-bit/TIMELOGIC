@@ -83,6 +83,7 @@ export const fetchEmployees = async () => {
   );
   return [...rows, ...rest.flat()];
 };
+export const fetchEmployeeSummary = (id: string) => api.get<any>(`/admin/users/${id}/summary`).then((r) => r.data);
 export const fetchPlanInfo    = () => api.get<any>('/admin/plan').then((r) => r.data);
 export const createEmployee   = (body: any) => api.post<any>('/admin/employees', body).then((r) => r.data);
 export const updateEmployee   = (id: string, body: { checkInMethod: EmployeeCheckInMethod; departmentId?: string }) =>
