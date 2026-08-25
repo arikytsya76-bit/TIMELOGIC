@@ -434,9 +434,7 @@ class ReportService {
         'Average Break (min)': r.averageBreakMinutes ?? '',
       })), 'No report history'],
       ['Notifications', data.notificationLogs.map((n) => ({
-        Organization: n.user?.organization?.name ?? '',
-        User: n.user ? `${n.user.firstName} ${n.user.lastName}`.trim() : '',
-        Email: n.user?.email ?? '',
+        'User ID': n.userId ?? '',
         Channel: n.channel ?? '',
         Subject: n.subject ?? '',
         Status: n.status ?? '',
@@ -676,11 +674,9 @@ class ReportService {
       ]));
 
     addSection('NOTIFICATIONS',
-      ['Organization', 'User', 'Email', 'Channel', 'Subject', 'Status', 'Sent At', 'Body'],
+      ['User ID', 'Channel', 'Subject', 'Status', 'Sent At', 'Body'],
       data.notificationLogs.map((n) => [
-        n.user?.organization?.name ?? '',
-        n.user ? `${n.user.firstName} ${n.user.lastName}`.trim() : '',
-        n.user?.email ?? '',
+        n.userId ?? '',
         n.channel ?? '',
         n.subject ?? '',
         n.status ?? '',
@@ -765,16 +761,20 @@ class ReportService {
     const empIds = orgEmployees.map((e) => e.id);
     const total = empIds.length;
 
-    const [present, late, onLeave, absent, flagged, openAlerts, activeSessions] = await Promise.all([
-      prisma.attendanceRecord.count({ where: { employeeId: { in: empIds }, date: today, status: 'PRESENT' } }),
-      prisma.attendanceRecord.count({ where: { employeeId: { in: empIds }, date: today, status: 'LATE' } }),
+    const [todayRecords, onLeave, flagged, openAlerts, activeSessions] = await Promise.all([
+      prisma.attendanceRecord.findMany({
+        where: { employeeId: { in: empIds }, date: today },
+        select: { employeeId: true, status: true },
+      }),
       prisma.leaveRequest.count({ where: { employeeId: { in: empIds }, status: 'APPROVED', startDate: { lte: today }, endDate: { gte: today } } }),
-      prisma.attendanceRecord.count({ where: { employeeId: { in: empIds }, date: today, status: 'ABSENT' } }),
       prisma.attendanceRecord.count({ where: { employeeId: { in: empIds }, date: today, flagged: true } }),
       prisma.fraudAlert.count({ where: { employeeId: { in: empIds }, status: 'NEW' } }),
       prisma.attendanceSession.count({ where: { office: { orgId }, status: { in: ['ACTIVE', 'PAUSED'] } } }),
     ]);
 
+    const present = todayRecords.filter((record) => record.status === 'PRESENT').length;
+    const late = todayRecords.filter((record) => record.status === 'LATE').length;
+    const absent = todayRecords.filter((record) => record.status === 'ABSENT').length;
     const attendanceRate = total ? Math.round(((present + late) / total) * 100) : 0;
     const calculatedAbsent = Math.max(absent, total - present - late - onLeave);
     return { total, present, late, onLeave, absent: calculatedAbsent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions };
@@ -784,7 +784,7 @@ class ReportService {
 
   async _generate(reportType, start, end, adminId, orgId, extraFilter = {}) {
     const orgFilter = orgId
-      ? { employee: { orgId } }
+      ? { employee: { orgId, role: 'EMPLOYEE' } }
       : {};
 
     const records = await prisma.attendanceRecord.findMany({

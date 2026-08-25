@@ -58,11 +58,23 @@ const monthly = async (req, res, next) => {
     const month = req.query.month ? +req.query.month : local.month;
     const result = await ReportService.generateMonthly(year, month, req.user.id, req.user.orgId);
     const records = result.records ?? [];
+    const { prisma } = require('../config/database');
+    const activeEmployees = await prisma.user.findMany({
+      where: { orgId: req.user.orgId, role: 'EMPLOYEE', status: 'ACTIVE' },
+      select: { id: true, department: { select: { name: true } } },
+    });
+    const activeIds = new Set(activeEmployees.map((employee) => employee.id));
     const departmentMap = new Map();
-    for (const record of records) {
-      const department = record.employee?.department?.name || 'No department';
+    for (const employee of activeEmployees) {
+      const department = employee.department?.name || 'No department';
       const current = departmentMap.get(department) ?? { department, total: 0, attended: 0 };
       current.total += 1;
+      departmentMap.set(department, current);
+    }
+    for (const record of records) {
+      if (!activeIds.has(record.employeeId)) continue;
+      const department = record.employee?.department?.name || 'No department';
+      const current = departmentMap.get(department) ?? { department, total: 0, attended: 0 };
       if (record.status === 'PRESENT' || record.status === 'LATE') current.attended += 1;
       departmentMap.set(department, current);
     }
