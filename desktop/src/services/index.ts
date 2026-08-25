@@ -39,6 +39,8 @@ export const fetchAttendance = async (query = '') => {
   );
   return [...rows, ...rest.flat()];
 };
+export const fetchAttendanceHistory = (startDate: string, endDate: string) =>
+  fetchAttendance(`startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
 export const fetchLiveAttendance = () =>
   api.get<any>(`/attendance/live?_live=${Date.now()}`).then((response) =>
     Array.isArray(response.data) ? response.data : Array.isArray(response.records) ? response.records : []

@@ -57,7 +57,28 @@ const monthly = async (req, res, next) => {
     const year  = req.query.year  ? +req.query.year  : local.year;
     const month = req.query.month ? +req.query.month : local.month;
     const result = await ReportService.generateMonthly(year, month, req.user.id, req.user.orgId);
-    res.json({ success: true, data: result });
+    const records = result.records ?? [];
+    const departmentMap = new Map();
+    for (const record of records) {
+      const department = record.employee?.department?.name || 'No department';
+      const current = departmentMap.get(department) ?? { department, total: 0, attended: 0 };
+      current.total += 1;
+      if (record.status === 'PRESENT' || record.status === 'LATE') current.attended += 1;
+      departmentMap.set(department, current);
+    }
+    const report = result.report ?? {};
+    res.json({ success: true, data: {
+      ...result,
+      totalPresent: report.totalPresent ?? records.filter((record) => record.status === 'PRESENT').length,
+      totalLate: report.totalLate ?? records.filter((record) => record.status === 'LATE').length,
+      totalAbsent: report.totalAbsent ?? records.filter((record) => record.status === 'ABSENT').length,
+      avgWorkHours: report.averageWorkHours ?? 0,
+      period: `${year}-${String(month).padStart(2, '0')}`,
+      departmentStats: [...departmentMap.values()].map((item) => ({
+        department: item.department,
+        attendanceRate: item.total ? Math.round((item.attended / item.total) * 100) : 0,
+      })),
+    } });
   } catch (err) { next(err); }
 };
 

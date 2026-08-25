@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, AlertTriangle, Wifi, Smartphone, Flag, UserCheck, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchLiveAttendance, flagRecord, approveRecord } from '../services';
+import { fetchLiveAttendance, fetchAttendanceHistory, flagRecord, approveRecord } from '../services';
 
 const STATUS_STYLE: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
@@ -27,11 +27,15 @@ export default function Attendance() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
+  const [view, setView] = useState<'today' | 'past'>('today');
+  const [pastDate, setPastDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const load = async () => {
     try {
       setError('');
-      const next = await fetchLiveAttendance();
+      const next = view === 'today'
+        ? await fetchLiveAttendance()
+        : await fetchAttendanceHistory('2000-01-01', pastDate);
       setRecords(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load live attendance records.');
@@ -39,7 +43,7 @@ export default function Attendance() {
       setLoading(false);
     }
   };
-  useEffect(() => { void load(); const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, []);
+  useEffect(() => { void load(); if (view !== 'today') return; const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [view, pastDate]);
 
   const filtered = records.filter((r) => {
     const matchSearch = `${r.employee?.firstName} ${r.employee?.lastName} ${r.employee?.employeeCode}`.toLowerCase().includes(search.toLowerCase());
@@ -69,6 +73,10 @@ export default function Attendance() {
       <div className="flex-1 overflow-y-auto p-6">
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
         {!loading && !error && records.length > 0 && <p className="mb-3 text-xs font-semibold text-emerald-700">{records.length} live attendance record{records.length === 1 ? '' : 's'} from the server</p>}
+        <div className="flex items-center gap-2 mb-4">
+          {(['today', 'past'] as const).map((option) => <button key={option} onClick={() => setView(option)} className={`text-xs font-semibold px-3 py-2 rounded-xl ${view === option ? 'bg-primary-700 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>{option === 'today' ? 'Today' : 'Past Attendance'}</button>)}
+          {view === 'past' && <input type="date" value={pastDate} onChange={(e) => setPastDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />}
+        </div>
         <div className="flex items-center gap-3 mb-5">
           <div className="relative flex-1 max-w-sm">
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -86,6 +94,7 @@ export default function Attendance() {
                 <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Clock In</th>
                 <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Clock Out</th>
                 <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Status</th>
+                <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Penalty</th>
                 <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Source / Verification</th>
                 <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">Actions</th>
               </tr></thead>
@@ -114,6 +123,7 @@ export default function Attendance() {
                     <td className="px-4 py-3">
                       <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${STATUS_STYLE[r.status] ?? 'bg-slate-100 text-slate-500'}`}>{r.status?.replace('_', ' ')}</span>
                     </td>
+                    <td className="px-4 py-3 font-semibold text-red-600">{r.penalty ? `₦${r.penalty.toLocaleString()}` : '₦0'}</td>
                     <td className="px-4 py-3">
                       <div className="space-y-1.5 text-[10px]">
                         <div className="flex items-center gap-1.5">

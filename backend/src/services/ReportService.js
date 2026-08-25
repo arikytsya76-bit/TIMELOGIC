@@ -75,6 +75,9 @@ class ReportService {
     const empOrgFilter = orgId && orgId !== 'platform-org' ? { employee: { orgId } } : {};
     const sessionOrgFilter = orgId && orgId !== 'platform-org' ? { office: { orgId } } : {};
     const scopedOrgId = orgId && orgId !== 'platform-org' ? orgId : null;
+    const scopedUserIds = scopedOrgId
+      ? (await prisma.user.findMany({ where: { orgId: scopedOrgId }, select: { id: true } })).map((user) => user.id)
+      : null;
 
     const [
       employees,
@@ -201,7 +204,7 @@ class ReportService {
         orderBy: { loggedInAt: 'desc' },
       }),
       prisma.screenshotLog.findMany({
-        where: scopedOrgId ? { employeeId: { in: employees.map((employee) => employee.id) } } : {},
+        where: scopedUserIds ? { employeeId: { in: scopedUserIds } } : {},
         orderBy: { timestamp: 'desc' },
       }),
       prisma.securitySettings.findMany({
@@ -223,8 +226,7 @@ class ReportService {
         orderBy: { generatedAt: 'desc' },
       }),
       prisma.notificationLog.findMany({
-        where: scopedOrgId ? { user: { orgId: scopedOrgId } } : {},
-        include: { user: { select: { firstName: true, lastName: true, email: true, organization: { select: { name: true } } } } },
+        where: scopedUserIds ? { userId: { in: scopedUserIds } } : {},
         orderBy: { sentAt: 'desc' },
       }),
     ]);
@@ -773,7 +775,9 @@ class ReportService {
       prisma.attendanceSession.count({ where: { office: { orgId }, status: { in: ['ACTIVE', 'PAUSED'] } } }),
     ]);
 
-    return { total, present, late, onLeave, absent, notRecorded: total - present - late - onLeave - absent, flagged, openAlerts, activeSessions };
+    const attendanceRate = total ? Math.round(((present + late) / total) * 100) : 0;
+    const calculatedAbsent = Math.max(absent, total - present - late - onLeave);
+    return { total, present, late, onLeave, absent: calculatedAbsent, notRecorded: Math.max(0, total - present - late - onLeave - absent), attendanceRate, flagged, openAlerts, activeSessions };
   }
 
   // ── private ──────────────────────────────────────────────────────────────────
@@ -789,7 +793,7 @@ class ReportService {
         ...orgFilter,
         ...extraFilter,
       },
-      include: { employee: { select: { firstName: true, lastName: true, departmentId: true } } },
+      include: { employee: { select: { firstName: true, lastName: true, departmentId: true, department: { select: { name: true } } } } },
     });
 
     const totalPresent  = records.filter((r) => r.status === 'PRESENT').length;

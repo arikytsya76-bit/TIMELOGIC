@@ -1,6 +1,6 @@
 {
   "name": "attendance-desktop",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "TimeLogic — Admin Desktop App",
   "author": "TimeLogic <support@timelogic.app>",
   "homepage": "https://timelogic.pages.dev",
@@ -35,8 +35,8 @@
     },
     "publish": [{
       "provider": "github",
-      "owner": "akenuw",
-      "repo": "timelogic-downloads",
+      "owner": "arikytsya76-bit",
+      "repo": "TIMELOGIC",
       "releaseType": "release"
     }],
     "linux": {
