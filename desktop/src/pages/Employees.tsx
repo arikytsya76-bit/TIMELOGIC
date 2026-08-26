@@ -7,6 +7,9 @@ import { getToken, authenticatedFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import type { AdminOrganization, EmployeeCheckInMethod } from '../types/api';
 
+const fileUrl = (value: string, cacheKey: string) =>
+  `${value.startsWith('http') ? value : `${SOCKET_URL}${value}`}?v=${encodeURIComponent(cacheKey)}`;
+
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30',
   SUSPENDED:  'bg-amber-100 text-amber-700 dark:bg-amber-900/30',
@@ -280,7 +283,7 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
             <div className="relative">
               {emp.profileImageUrl && !imgError ? (
                 <img
-                  src={`${SOCKET_URL}${emp.profileImageUrl}?v=${imgVersion}`}
+                  src={fileUrl(emp.profileImageUrl, `${emp.id}-${imgVersion}`)}
                   alt={`${emp.firstName?.[0] ?? ''}${emp.lastName?.[0] ?? ''}`}
                   className="w-16 h-16 rounded-full object-cover border-2 border-emerald-500 flex-shrink-0"
                   onError={() => setImgError(true)}
@@ -438,7 +441,7 @@ export default function Employees() {
                       <div className="flex items-center gap-2.5">
                         {/* Face photo avatar — shows photo if uploaded, initials otherwise */}
                         {e.profileImageUrl ? (
-                          <img src={`${SOCKET_URL}${e.profileImageUrl}`} alt="face"
+                          <img src={fileUrl(e.profileImageUrl, e.updatedAt ?? e.id)} alt="face"
                             className="w-9 h-9 rounded-full object-cover border-2 border-emerald-500 flex-shrink-0" />
                         ) : (
                           <div className="w-9 h-9 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center flex-shrink-0 border-2 border-dashed border-slate-300">

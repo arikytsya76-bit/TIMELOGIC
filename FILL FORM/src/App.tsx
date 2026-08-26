@@ -28,7 +28,12 @@ type Office = {
   breakEnd: string;
   wifiSSID: string;
   publicIp: string;
+  weeklySchedule: Record<string, { openTime: string; closeTime: string }>;
 };
+const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
+const defaultWeeklySchedule = () => Object.fromEntries(
+  DAYS.map((day) => [day, day === 'sunday' ? { openTime: '', closeTime: '' } : { openTime: '08:00', closeTime: '17:00' }]),
+);
 type Department = { name: string; breakStart: string; breakEnd: string };
 type Organization = {
   id: string;
@@ -74,6 +79,7 @@ const freshOffice = (): Office => ({
   breakEnd: "14:00",
   wifiSSID: "",
   publicIp: "",
+  weeklySchedule: defaultWeeklySchedule(),
 });
 const input = "field";
 
@@ -162,6 +168,8 @@ function OrganizationForm({ onBack }: { onBack: () => void }) {
       ...p,
       offices: p.offices.map((o, n) => (n === i ? { ...o, [key]: value } : o)),
     }));
+  const updateOfficeDay = (i: number, day: string, field: 'openTime' | 'closeTime', value: string) =>
+    setForm((p) => ({ ...p, offices: p.offices.map((o, n) => n === i ? { ...o, weeklySchedule: { ...o.weeklySchedule, [day]: { ...o.weeklySchedule[day], [field]: value } } } : o) }));
   const updateDepartment = (i: number, key: keyof Department, value: string) =>
     setForm((p) => ({
       ...p,
@@ -362,6 +370,18 @@ function OrganizationForm({ onBack }: { onBack: () => void }) {
                     }
                   />
                 </Field>
+                <div className="schedule-grid">
+                  <strong>Weekly opening and closing times</strong>
+                  <div className="schedule-heading"><span>Day</span><span>Open</span><span>Close</span></div>
+                  {DAYS.map((day) => (
+                    <div className="schedule-row" key={day}>
+                      <span>{day[0].toUpperCase() + day.slice(1)}</span>
+                      <input className={input} type="time" value={o.weeklySchedule[day]?.openTime ?? ''} onChange={(e) => updateOfficeDay(i, day, 'openTime', e.target.value)} />
+                      <input className={input} type="time" value={o.weeklySchedule[day]?.closeTime ?? ''} onChange={(e) => updateOfficeDay(i, day, 'closeTime', e.target.value)} />
+                    </div>
+                  ))}
+                  <p className="muted">Leave both Sunday fields blank when the office is closed.</p>
+                </div>
                 <Field label="Break minutes">
                   <input
                     className={input}
