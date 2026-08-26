@@ -23,6 +23,7 @@ export const activateUser     = (id: string) => api.put<any>(`/admin/users/${id}
 // Super Admin user management: suspend/activate ADMINS only, reassign EMPLOYEES only
 export const suspendAdmin     = (id: string) => api.put<any>(`/super/users/${id}/suspend`, {});
 export const activateAdmin    = (id: string) => api.put<any>(`/super/users/${id}/activate`, {});
+export const renameAdmin      = (id: string, firstName: string, lastName: string) => api.put<any>(`/super/users/${id}/name`, { firstName, lastName }).then((r) => r.data);
 export const reassignEmployee = (id: string, orgId: string) => api.put<any>(`/super/users/${id}/reassign`, { orgId });
 export const resetUserDevice  = (id: string) => api.post<any>(`/admin/users/${id}/reset-device`, {});
 export const updateProfile    = (body: { firstName?: string; lastName?: string; email?: string }) => api.put<any>('/super/profile', body).then((r) => r.data);

@@ -102,7 +102,7 @@ export async function checkOutApi(): Promise<{ checkOutTime: string; totalWorkHo
 export async function getHistoryApi(page = 1, limit = 50): Promise<AttendanceRecord[]> {
   const res = await api.get<any>(`/attendance/history?page=${page}&limit=${limit}&_live=${Date.now()}`);
   // Backend returns { data: [...] } — fallback to res.records for safety
-  const rows: any[] = Array.isArray(res) ? res : Array.isArray((res as any).records) ? (res as any).records : [];
+  const rows: any[] = Array.isArray(res) ? res : Array.isArray((res as any)?.records) ? (res as any).records : Array.isArray((res as any)?.data) ? (res as any).data : [];
   return rows.map((r: any) => ({
     id: r.id,
     date: r.date,

@@ -14,7 +14,7 @@ const listOrgs = async (req, res, next) => {
         offices: {
           select: {
             id: true, name: true, address: true, timezone: true, isActive: true,
-            wifiSSID: true, publicIp: true, openTime: true, closeTime: true, breakMinutes: true,
+            wifiSSID: true, publicIp: true, openTime: true, closeTime: true, weeklySchedule: true, breakMinutes: true,
             graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
             autoSessionMinutes: true, breakStart: true, breakEnd: true,
             securitySettings: { select: { id: true } },
@@ -105,6 +105,7 @@ const createOrg = async (req, res, next) => {
               gracePenalty:       Number.isFinite(+o.gracePenalty)       ? parseInt(o.gracePenalty, 10)       : 0,
               latePenalty:        Number.isFinite(+o.latePenalty)        ? parseInt(o.latePenalty, 10)        : 0,
               autoSessionMinutes: Number.isFinite(+o.autoSessionMinutes) ? parseInt(o.autoSessionMinutes, 10) : 60,
+              weeklySchedule: o.weeklySchedule || null,
               breakStart: o.breakStart || null,
               breakEnd:   o.breakEnd   || null,
             },
@@ -260,6 +261,7 @@ const updateOrg = async (req, res, next) => {
         if (o.publicIp  !== undefined) data.publicIp  = (o.publicIp && o.publicIp.trim()) ? o.publicIp.trim() : null;
         if (o.openTime  !== undefined) data.openTime  = o.openTime || '08:00';
         if (o.closeTime !== undefined) data.closeTime = o.closeTime || '17:00';
+        if (o.weeklySchedule !== undefined) data.weeklySchedule = o.weeklySchedule || null;
         if (o.breakMinutes !== undefined) data.breakMinutes = Number.isFinite(+o.breakMinutes) ? parseInt(o.breakMinutes, 10) : 60;
         if (o.graceMinutes !== undefined)       data.graceMinutes       = parseInt(o.graceMinutes, 10) || 0;
         if (o.lateAfterMinutes !== undefined)   data.lateAfterMinutes   = parseInt(o.lateAfterMinutes, 10) || 0;
@@ -339,6 +341,20 @@ const orgUsers = async (req, res, next) => {
       orgName: undefined,
     }));
     res.json({ success: true, data: enriched });
+  } catch (err) { next(err); }
+};
+
+// PUT /api/super/users/:userId/name — rename an organization ADMIN only.
+const renameAdmin = async (req, res, next) => {
+  try {
+    const firstName = String(req.body?.firstName ?? '').trim();
+    const lastName = String(req.body?.lastName ?? '').trim();
+    if (!firstName || !lastName) return res.status(400).json({ success: false, message: 'First and last name are required.' });
+    const admin = await prisma.user.findUnique({ where: { id: req.params.userId }, select: { id: true, role: true } });
+    if (!admin) return res.status(404).json({ success: false, message: 'User not found.' });
+    if (admin.role !== 'ADMIN') return res.status(403).json({ success: false, message: 'Only organization admins can be renamed.' });
+    const user = await prisma.user.update({ where: { id: admin.id }, data: { firstName, lastName }, select: { id: true, firstName: true, lastName: true, email: true, role: true, orgId: true } });
+    res.json({ success: true, data: user });
   } catch (err) { next(err); }
 };
 
@@ -756,4 +772,4 @@ const setLeavePolicy = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-module.exports = { listOrgs, createOrg, updateOrg, deleteOrg, orgUsers, systemStats, getNotifications, officeSecurityDetail, updateOfficeSecurity, systemReport, addDepartment, getDepartmentBreakPolicy, updateDepartmentBreakPolicy, employeeFullRecord, reemployEmployee, suspendAdmin, activateAdmin, reassignEmployee, updateProfile, resetSystem, getLeavePolicy, setLeavePolicy };
+module.exports = { listOrgs, createOrg, updateOrg, deleteOrg, orgUsers, renameAdmin, systemStats, getNotifications, officeSecurityDetail, updateOfficeSecurity, systemReport, addDepartment, getDepartmentBreakPolicy, updateDepartmentBreakPolicy, employeeFullRecord, reemployEmployee, suspendAdmin, activateAdmin, reassignEmployee, updateProfile, resetSystem, getLeavePolicy, setLeavePolicy };

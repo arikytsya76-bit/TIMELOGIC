@@ -84,6 +84,7 @@ router.put('/profile',                           ctrl.updateProfile);
 router.post('/reset',                            ctrl.resetSystem);
 router.put('/users/:userId/suspend',             ctrl.suspendAdmin);
 router.put('/users/:userId/activate',            ctrl.activateAdmin);
+router.put('/users/:userId/name',                 ctrl.renameAdmin);
 router.put('/users/:userId/reassign',            ctrl.reassignEmployee);
 
 module.exports = router;

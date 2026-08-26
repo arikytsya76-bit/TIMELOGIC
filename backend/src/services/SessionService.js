@@ -4,7 +4,7 @@ const { redis, PREFIXES } = require('../config/redis');
 const env = require('../config/env');
 const QRTokenService = require('./QRTokenService');
 const logger = require('../config/logger');
-const { atZonedTime, zonedParts, isSunday } = require('../utils/attendanceClock');
+const { atZonedTime, zonedParts, isSunday, officeHoursFor } = require('../utils/attendanceClock');
 const { getCurrentServerTime } = require('../utils/networkTime');
 
 // Implements the State pattern for AttendanceSession lifecycle.
@@ -25,16 +25,15 @@ class SessionService {
     // Snapshot office + org name and read the office work hours
     const office = await prisma.office.findUnique({
       where: { id: officeId },
-      select: { orgId: true, name: true, openTime: true, closeTime: true, timezone: true, organization: { select: { name: true } } },
+      select: { orgId: true, name: true, openTime: true, closeTime: true, weeklySchedule: true, timezone: true, organization: { select: { name: true } } },
     });
     if (!office || office.orgId !== admin.orgId) throw Object.assign(new Error('Office not found'), { status: 404 });
 
     const now      = await getCurrentServerTime();
-    if (isSunday(now, office.timezone)) {
-      throw Object.assign(new Error('Attendance sessions are not available on Sundays.'), { status: 400 });
-    }
-    const openMin  = this._toMinutes(office.openTime);
-    const closeMin = this._toMinutes(office.closeTime);
+    const hours = officeHoursFor(now, office);
+    if (!hours) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
+    const openMin  = this._toMinutes(hours.openTime);
+    const closeMin = this._toMinutes(hours.closeTime);
     let openAt = null;
     let closeAt = null;
 
@@ -42,21 +41,21 @@ class SessionService {
     if (openMin != null) {
       const local = zonedParts(now, office.timezone);
       const localMin = local.hour * 60 + local.minute;
-      openAt = atZonedTime(now, office.openTime, office.timezone);
-      closeAt = closeMin != null ? atZonedTime(now, office.closeTime, office.timezone) : null;
+      openAt = atZonedTime(now, hours.openTime, office.timezone);
+      closeAt = closeMin != null ? atZonedTime(now, hours.closeTime, office.timezone) : null;
       if (closeAt && closeMin <= openMin) {
-        if (localMin < closeMin) openAt = atZonedTime(now, office.openTime, office.timezone, -1);
-        else closeAt = atZonedTime(now, office.closeTime, office.timezone, 1);
+        if (localMin < closeMin) openAt = atZonedTime(now, hours.openTime, office.timezone, -1);
+        else closeAt = atZonedTime(now, hours.closeTime, office.timezone, 1);
       }
       if (now < openAt) {
         throw Object.assign(
-          new Error(`Too early. Sessions can be created at the ${office.openTime} opening time (${office.timezone}).`),
+          new Error(`Too early. Sessions can be created at the ${hours.openTime} opening time (${office.timezone}).`),
           { status: 400 }
         );
       }
       if (closeAt && now >= closeAt) {
         throw Object.assign(
-          new Error(`The ${office.closeTime} closing time (${office.timezone}) has passed. A session cannot be created after the work day closes.`),
+          new Error(`The ${hours.closeTime} closing time (${office.timezone}) has passed. A session cannot be created after the work day closes.`),
           { status: 400 }
         );
       }
@@ -84,8 +83,8 @@ class SessionService {
 
     // Session runs from now until the office close time
     const start  = now;
-    let autoEnd = (closeMin != null) ? atZonedTime(now, office.closeTime, office.timezone) : new Date(start.getTime() + 8 * 3600 * 1000);
-    if (autoEnd <= start && closeMin != null) autoEnd = atZonedTime(now, office.closeTime, office.timezone, 1);
+    let autoEnd = (closeMin != null) ? atZonedTime(now, hours.closeTime, office.timezone) : new Date(start.getTime() + 8 * 3600 * 1000);
+    if (autoEnd <= start && closeMin != null) autoEnd = atZonedTime(now, hours.closeTime, office.timezone, 1);
 
     // Create as ACTIVE immediately and generate first QR
     const session = await prisma.attendanceSession.create({
@@ -250,18 +249,17 @@ class SessionService {
   async _assertWithinOfficeHours(sessionId, orgId) {
     const session = await prisma.attendanceSession.findFirst({
       where: { id: sessionId, office: { orgId } },
-      select: { office: { select: { openTime: true, closeTime: true, timezone: true } } },
+      select: { office: { select: { openTime: true, closeTime: true, weeklySchedule: true, timezone: true } } },
     });
     if (!session?.office) throw Object.assign(new Error('Session not found'), { status: 404 });
 
     const now = await getCurrentServerTime();
-    if (isSunday(now, session.office.timezone)) {
-      throw Object.assign(new Error('Attendance sessions are not available on Sundays.'), { status: 400 });
-    }
-    const openAt = atZonedTime(now, session.office.openTime, session.office.timezone);
-    let closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone);
-    const openMin = this._toMinutes(session.office.openTime);
-    const closeMin = this._toMinutes(session.office.closeTime);
+    const hours = officeHoursFor(now, session.office);
+    if (!hours) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
+    const openAt = atZonedTime(now, hours.openTime, session.office.timezone);
+    let closeAt = atZonedTime(now, hours.closeTime, session.office.timezone);
+    const openMin = this._toMinutes(hours.openTime);
+    const closeMin = this._toMinutes(hours.closeTime);
     const local = zonedParts(now, session.office.timezone);
     if (closeMin <= openMin && local.hour * 60 + local.minute < closeMin) {
       const previousOpening = atZonedTime(now, session.office.openTime, session.office.timezone, -1);
@@ -273,7 +271,7 @@ class SessionService {
 
     if (!openAt || !closeAt || now < openAt || now >= closeAt) {
       throw Object.assign(
-        new Error(`Sessions can only be activated between ${session.office.openTime} and ${session.office.closeTime} (${session.office.timezone}).`),
+        new Error(`Sessions can only be activated between ${hours.openTime} and ${hours.closeTime} (${session.office.timezone}).`),
         { status: 400 }
       );
     }

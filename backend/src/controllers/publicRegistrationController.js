@@ -63,6 +63,7 @@ async function createOrganization(req, res, next) {
           id: uuidv4(), orgId: org.id, name: clean(office.name) || 'Main Office', address: clean(office.address),
           timezone: clean(office.timezone) || org.timezone, wifiSSID: clean(office.wifiSSID) || null, publicIp: clean(office.publicIp) || null,
           openTime: clean(office.openTime) || org.openingTime, closeTime: clean(office.closeTime) || '17:00',
+          weeklySchedule: office.weeklySchedule || null,
           breakMinutes: asNumber(office.breakMinutes, 60), graceMinutes: asNumber(office.graceMinutes, 30),
           lateAfterMinutes: asNumber(office.lateAfterMinutes, 90), gracePenalty: asNumber(office.gracePenalty, 0),
           latePenalty: asNumber(office.latePenalty, 0), autoSessionMinutes: asNumber(office.autoSessionMinutes, 60),

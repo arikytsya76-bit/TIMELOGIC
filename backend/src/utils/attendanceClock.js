@@ -51,6 +51,27 @@ function isSunday(value = new Date(), timeZone = 'Africa/Lagos') {
   return new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay() === 0;
 }
 
+function weekdayKey(value = new Date(), timeZone = 'Africa/Lagos') {
+  const p = zonedParts(value, timeZone);
+  return ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][
+    new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay()
+  ];
+}
+
+function officeHoursFor(value, office = {}) {
+  const key = weekdayKey(value, office.timezone);
+  const schedule = office.weeklySchedule;
+  if (schedule && typeof schedule === 'object' && Object.prototype.hasOwnProperty.call(schedule, key)) {
+    const day = schedule[key];
+    if (!day || !day.openTime || !day.closeTime) return null;
+    return { openTime: day.openTime, closeTime: day.closeTime };
+  }
+  if (key === 'sunday') return null;
+  return office.openTime && office.closeTime
+    ? { openTime: office.openTime, closeTime: office.closeTime }
+    : null;
+}
+
 function dateOnly(value = new Date(), timeZone = 'Africa/Lagos') {
   return new Date(`${dateKey(value, timeZone)}T00:00:00.000Z`);
 }
@@ -191,6 +212,8 @@ module.exports = {
   zonedParts,
   dateKey,
   isSunday,
+  weekdayKey,
+  officeHoursFor,
   dateOnly,
   dayBounds,
   atZonedTime,

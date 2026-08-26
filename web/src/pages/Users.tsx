@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Crown, Shield, User, ChevronsUpDown, Calendar, Coffee, AlertTriangle, FileText, ArrowLeftRight, Smartphone } from 'lucide-react';
 import PageShell from '../components/PageShell';
-import { fetchAllOrgs, fetchOrgUsers, fetchEmployeeRecords, reemployEmployee, suspendAdmin, activateAdmin, reassignEmployee, resetUserDevice } from '../services';
+import { fetchAllOrgs, fetchOrgUsers, fetchEmployeeRecords, reemployEmployee, suspendAdmin, activateAdmin, renameAdmin, reassignEmployee, resetUserDevice } from '../services';
 import { downloadCSV } from '../utils/csv';
 
 const AVATAR_COLORS = ['#15803d','#0891b2','#7c3aed','#b45309','#be185d','#0369a1','#dc2626','#d97706'];
@@ -223,11 +223,14 @@ export default function Users() {
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       {/* Super Admin may suspend ADMINS only; EMPLOYEES can only be reassigned */}
                       {u.role === 'ADMIN' && (
-                        <button
-                          onClick={async () => { u.status === 'ACTIVE' ? await suspendAdmin(u.id) : await activateAdmin(u.id); loadUsers(); }}
-                          className={`text-sm font-semibold transition-colors ${u.status === 'ACTIVE' ? 'text-red-600 hover:text-red-800' : 'text-primary-700 hover:text-primary-900'}`}>
-                          {u.status === 'ACTIVE' ? 'Suspend Admin' : 'Activate Admin'}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button onClick={async () => { const firstName = window.prompt('Admin first name', u.firstName); const lastName = firstName === null ? null : window.prompt('Admin last name', u.lastName); if (firstName?.trim() && lastName?.trim()) { try { await renameAdmin(u.id, firstName, lastName); loadUsers(); } catch (err: any) { alert(err?.message ?? 'Could not rename admin.'); } } }} className="text-sm font-semibold text-primary-700 hover:text-primary-900">Rename</button>
+                          <button
+                            onClick={async () => { u.status === 'ACTIVE' ? await suspendAdmin(u.id) : await activateAdmin(u.id); loadUsers(); }}
+                            className={`text-sm font-semibold transition-colors ${u.status === 'ACTIVE' ? 'text-red-600 hover:text-red-800' : 'text-primary-700 hover:text-primary-900'}`}>
+                            {u.status === 'ACTIVE' ? 'Suspend Admin' : 'Activate Admin'}
+                          </button>
+                        </div>
                       )}
                       {u.role === 'EMPLOYEE' && !isTerminated && (
                         <div className="flex items-center gap-3">

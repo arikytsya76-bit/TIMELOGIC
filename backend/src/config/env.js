@@ -78,7 +78,7 @@ module.exports = {
   // code — they live per-office in the database, set from the Super Admin panel.
   // ── Session automation windows (minutes) ──
   CHECKIN_WINDOW_MIN:     parseInt(process.env.CHECKIN_WINDOW_MIN || '40', 10),  // fallback when an office has no late-after policy
-  AUTO_SESSION_LEAD_MIN:  parseInt(process.env.AUTO_SESSION_LEAD_MIN || '25', 10), // auto-create before office opening
+    AUTO_SESSION_LEAD_MIN:  parseInt(process.env.AUTO_SESSION_LEAD_MIN || '40', 10), // auto-create before office opening
   AUTO_CHECKOUT_LAG_MIN:  parseInt(process.env.AUTO_CHECKOUT_LAG_MIN || '40', 10), // auto check-out at closeTime+40
 
   UPLOAD_DIR: process.env.UPLOAD_DIR || 'uploads',

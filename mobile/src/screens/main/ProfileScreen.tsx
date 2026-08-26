@@ -38,7 +38,7 @@ export default function ProfileScreen() {
 
   if (!user) return null;
 
-  const faceUrl = user.profileImageUrl ? API_BASE + user.profileImageUrl : null;
+  const faceUrl = user.profileImageUrl ? `${API_BASE}${user.profileImageUrl}?v=${encodeURIComponent(user.id)}` : null;
 
   return (
     <SafeAreaView style={styles.safe}>

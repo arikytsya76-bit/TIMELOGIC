@@ -141,7 +141,7 @@ export default function HomeScreen() {
   };
 
   const { hasCheckedIn, hasCheckedOut, status, checkInTime, checkOutTime, onBreak, breakType, breakStartTime } = attendance;
-  const faceUri = user?.profileImageUrl ? `${SOCKET_URL}${user.profileImageUrl}` : null;
+  const faceUri = user?.profileImageUrl ? `${SOCKET_URL}${user.profileImageUrl}?v=${encodeURIComponent(user.id)}` : null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -256,7 +256,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.quickGrid}>
               {BREAK_TYPES.map((b) => (
-                <TouchableOpacity key={b.type} style={styles.quickCard} onPress={() => handleBreak(b)} activeOpacity={0.8}>
+                <TouchableOpacity key={b.type} style={styles.quickCard} onPress={() => b.type === 'LUNCH' || b.type === 'SHORT_BREAK' ? handleBreak(b) : Alert.alert('Coming Soon', 'This update is coming soon.')} activeOpacity={0.8}>
                   <View style={[styles.quickIcon, { backgroundColor: b.color + '18' }]}>
                     <Ionicons name={b.icon as any} size={22} color={b.color} />
                   </View>

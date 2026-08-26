@@ -22,7 +22,7 @@ const QRTokenService = require('../services/QRTokenService');
 const BreakService = require('../services/BreakService');
 const AttendanceService = require('../services/AttendanceService');
 const logger = require('../config/logger');
-const { atZonedTime, openingOccurrence, zonedParts, isSunday } = require('../utils/attendanceClock');
+const { atZonedTime, openingOccurrence, zonedParts, isSunday, officeHoursFor } = require('../utils/attendanceClock');
 const { getCurrentServerTime } = require('../utils/networkTime');
 
 let _timer = null;
@@ -55,17 +55,18 @@ async function tick() {
     for (const org of orgs) {
       for (const office of org.offices) {
         const local = zonedParts(now, office.timezone);
-        if (isSunday(now, office.timezone)) continue;
+        const hours = officeHoursFor(now, office);
+        if (!hours) continue;
         const minOfDay = local.hour * 60 + local.minute;
-        const openMin  = toMinutes(office.openTime);
-        const closeMin = toMinutes(office.closeTime);
+        const openMin  = toMinutes(hours.openTime);
+        const closeMin = toMinutes(hours.closeTime);
         if (openMin == null || closeMin == null) continue;
 
-        let openAt = atZonedTime(now, office.openTime, office.timezone);
-        let closeAt = atZonedTime(now, office.closeTime, office.timezone);
+        let openAt = atZonedTime(now, hours.openTime, office.timezone);
+        let closeAt = atZonedTime(now, hours.closeTime, office.timezone);
         if (closeMin <= openMin) {
-          if (minOfDay < closeMin) openAt = atZonedTime(now, office.openTime, office.timezone, -1);
-          else closeAt = atZonedTime(now, office.closeTime, office.timezone, 1);
+          if (minOfDay < closeMin) openAt = atZonedTime(now, hours.openTime, office.timezone, -1);
+          else closeAt = atZonedTime(now, hours.closeTime, office.timezone, 1);
         }
         const autoCreateAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
         if (now >= autoCreateAt && now < closeAt) await autoCreate(org, office, now, openAt, closeAt);
@@ -185,7 +186,7 @@ async function endSessionsOutsideOfficeHours(now) {
     where: { status: { in: ['ACTIVE', 'PAUSED'] } },
     select: {
       id: true, sessionName: true,
-      office: { select: { openTime: true, closeTime: true, timezone: true } },
+      office: { select: { openTime: true, closeTime: true, weeklySchedule: true, timezone: true } },
     },
   });
 
@@ -195,7 +196,8 @@ async function endSessionsOutsideOfficeHours(now) {
     if (openMin == null || closeMin == null) continue;
 
     const local = zonedParts(now, session.office.timezone);
-    if (isSunday(now, session.office.timezone)) {
+    const hours = officeHoursFor(now, session.office);
+    if (!hours) {
       await prisma.attendanceSession.updateMany({
         where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
         data: { status: 'ENDED' },
@@ -205,13 +207,13 @@ async function endSessionsOutsideOfficeHours(now) {
       continue;
     }
     const localMin = local.hour * 60 + local.minute;
-    let openAt = atZonedTime(now, session.office.openTime, session.office.timezone);
-    let closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone);
+    let openAt = atZonedTime(now, hours.openTime, session.office.timezone);
+    let closeAt = atZonedTime(now, hours.closeTime, session.office.timezone);
     if (closeMin <= openMin) {
       if (localMin < closeMin) {
-        openAt = atZonedTime(now, session.office.openTime, session.office.timezone, -1);
+        openAt = atZonedTime(now, hours.openTime, session.office.timezone, -1);
       } else {
-        closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone, 1);
+        closeAt = atZonedTime(now, hours.closeTime, session.office.timezone, 1);
       }
     }
 

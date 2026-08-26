@@ -167,6 +167,9 @@ model Office {
   publicIp           String? // office public IP (web/PWA "same network" check)
   openTime           String  @default("08:00") // work day start / check-in opens (HH:MM)
   closeTime          String  @default("17:00") // work day end / session auto-closes (HH:MM)
+  // Optional weekday schedule. Missing entries preserve legacy Mon-Sat hours;
+  // an empty entry means the office is closed for that weekday.
+  weeklySchedule     Json?
   // ── Attendance grace + penalties (set per organization) ──
   graceMinutes       Int     @default(30) // minutes after open with no penalty (on-time window)
   lateAfterMinutes   Int     @default(90) // minutes after open when status becomes LATE

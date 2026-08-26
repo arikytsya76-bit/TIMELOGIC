@@ -143,10 +143,10 @@ const getStatus = async (req, res, next) => {
 const getHistory = async (req, res, next) => {
   try {
     const now = new Date();
-    const defaultStart = new Date(now); defaultStart.setDate(now.getDate() - 30);
     const organization = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { timezone: true } });
     const timezone = organization?.timezone || 'Africa/Lagos';
-    const startDate = req.query.startDate || dateKey(defaultStart, timezone);
+    // History is an audit view: do not hide older retained records by default.
+    const startDate = req.query.startDate || '2000-01-01';
     const endDate   = req.query.endDate   || dateKey(now, timezone);
     const page = Math.max(1, Number(req.query.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 30));

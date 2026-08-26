@@ -5,7 +5,7 @@ const { redis, PREFIXES } = require('../config/redis');
 const env = require('../config/env');
 const logger = require('../config/logger');
 const EmployeePolicy = require('./EmployeePolicyService');
-const { dateOnly, evaluateAttendance, attendanceDate, isSunday, openingOccurrence, atZonedTime } = require('../utils/attendanceClock');
+const { dateOnly, evaluateAttendance, attendanceDate, isSunday, openingOccurrence, atZonedTime, officeHoursFor } = require('../utils/attendanceClock');
 const { getCurrentServerTime } = require('../utils/networkTime');
 
 const CHALLENGE_TTL_SECONDS = 120; // code valid for 2 minutes
@@ -22,13 +22,11 @@ class AttendanceService {
       where: { id: sessionId },
       select: {
         id: true, status: true, startTime: true, endTime: true,
-        office: { select: { id: true, orgId: true, isActive: true, wifiSSID: true, publicIp: true, securitySettings: true } },
+        office: { select: { id: true, orgId: true, isActive: true, wifiSSID: true, publicIp: true, timezone: true, weeklySchedule: true, securitySettings: true } },
       },
     });
     const challengeTime = await getCurrentServerTime();
-    if (isSunday(challengeTime, session?.office?.timezone)) {
-      return { success: false, reason: 'SUNDAY_CLOSED', message: 'Attendance is not recorded on Sundays.' };
-    }
+    if (session?.office && !officeHoursFor(challengeTime, session.office)) return { success: false, reason: 'SUNDAY_CLOSED', message: 'This office is closed today.' };
     if (
       !session || session.status !== 'ACTIVE' || !session.office?.isActive ||
       challengeTime < session.startTime || (session.endTime && challengeTime > session.endTime)
@@ -219,7 +217,7 @@ class AttendanceService {
         id: true,
         startTime: true,
         endTime: true,
-        office: { select: { id: true, orgId: true, timezone: true, openTime: true, closeTime: true } },
+        office: { select: { id: true, orgId: true, timezone: true, openTime: true, closeTime: true, weeklySchedule: true } },
       },
     });
     if (!session?.office) return;
@@ -234,7 +232,7 @@ class AttendanceService {
       openingReference: session.startTime,
     });
     const now = await getCurrentServerTime();
-    if (isSunday(session.startTime, timezone)) return;
+    if (!officeHoursFor(session.startTime, session.office)) return;
     const candidateStart = new Date(session.startTime.getTime() - 24 * 60 * 60 * 1000);
     const candidateEnd = new Date((session.endTime || session.startTime).getTime() + 24 * 60 * 60 * 1000);
     const admins = await prisma.user.findMany({
@@ -349,7 +347,7 @@ class AttendanceService {
         office: {
           select: {
             id: true, orgId: true, name: true, isActive: true, timezone: true,
-            wifiSSID: true, publicIp: true, openTime: true, closeTime: true,
+            wifiSSID: true, publicIp: true, openTime: true, closeTime: true, weeklySchedule: true,
             graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
             securitySettings: true,
           },
@@ -363,9 +361,7 @@ class AttendanceService {
     ) {
       return { success: false, reason: 'SESSION_CLOSED' };
     }
-    if (isSunday(clockInTime, session.office.timezone)) {
-      return { success: false, reason: 'SUNDAY_CLOSED', message: 'Attendance is not recorded on Sundays.' };
-    }
+    if (!officeHoursFor(clockInTime, session.office)) return { success: false, reason: 'SUNDAY_CLOSED', message: 'This office is closed today.' };
     if (session.office.orgId !== employee.orgId) {
       return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
     }
@@ -441,7 +437,7 @@ class AttendanceService {
             office: {
               select: {
                 id: true, orgId: true, name: true, wifiSSID: true, publicIp: true,
-                openTime: true, closeTime: true, timezone: true,
+                openTime: true, closeTime: true, weeklySchedule: true, timezone: true,
                 securitySettings: true,
               },
             },
@@ -614,9 +610,7 @@ class AttendanceService {
       throw Object.assign(new Error('Employee password is incorrect.'), { status: 403 });
     }
     const session = await this._loadManualSession(sessionId, adminOrgId, clockInTime);
-    if (isSunday(clockInTime, session.office.timezone)) {
-      throw Object.assign(new Error('Attendance is not recorded on Sundays.'), { status: 400 });
-    }
+    if (!officeHoursFor(clockInTime, session.office)) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
     if (this._isBeforeOpening(clockInTime, session)) {
       throw Object.assign(new Error('Check-in opens at the organisation opening time.'), { status: 400, reason: 'CHECKIN_NOT_OPEN' });
     }
@@ -658,7 +652,7 @@ class AttendanceService {
         session: {
           select: {
             startTime: true,
-            office: { select: { orgId: true, openTime: true, closeTime: true, timezone: true } },
+            office: { select: { orgId: true, openTime: true, closeTime: true, weeklySchedule: true, timezone: true } },
           },
         },
       },
@@ -683,24 +677,23 @@ class AttendanceService {
   _assertCheckoutAllowed(record, clockOutTime) {
     const office = record.session?.office;
     if (!office?.closeTime) return;
-    if (isSunday(clockOutTime, office.timezone)) {
-      throw Object.assign(new Error('Attendance is not recorded on Sundays.'), { status: 400, reason: 'SUNDAY_CLOSED' });
-    }
+    const hours = officeHoursFor(clockOutTime, office);
+    if (!hours) throw Object.assign(new Error('This office is closed today.'), { status: 400, reason: 'SUNDAY_CLOSED' });
 
     const opening = openingOccurrence(
       record.session.startTime,
-      office.openTime,
+      hours.openTime,
       office.timezone,
-      office.closeTime,
+      hours.closeTime,
       record.session.startTime,
     );
-    let closeAt = atZonedTime(record.session.startTime, office.closeTime, office.timezone);
+    let closeAt = atZonedTime(record.session.startTime, hours.closeTime, office.timezone);
     if (opening && closeAt && closeAt <= opening) {
-      closeAt = atZonedTime(record.session.startTime, office.closeTime, office.timezone, 1);
+      closeAt = atZonedTime(record.session.startTime, hours.closeTime, office.timezone, 1);
     }
     if (closeAt && clockOutTime < closeAt) {
       throw Object.assign(
-        new Error(`Check-out is available after the organisation closes at ${office.closeTime} (${office.timezone || 'Africa/Lagos'}).`),
+        new Error(`Check-out is available after the organisation closes at ${hours.closeTime} (${office.timezone || 'Africa/Lagos'}).`),
         { status: 400, reason: 'CHECKOUT_TOO_EARLY' }
       );
     }
@@ -734,7 +727,7 @@ class AttendanceService {
         id: true, status: true, startTime: true, endTime: true,
         office: {
           select: {
-            id: true, orgId: true, isActive: true, timezone: true, openTime: true, closeTime: true,
+            id: true, orgId: true, isActive: true, timezone: true, openTime: true, closeTime: true, weeklySchedule: true,
             graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
           },
         },
@@ -881,8 +874,9 @@ class AttendanceService {
 
   _isAfterCheckInDeadline(value, session) {
     const office = session.office ?? {};
-    if (!office.openTime) return false;
-    const opening = openingOccurrence(session.startTime, office.openTime, office.timezone, office.closeTime, session.startTime);
+    const hours = officeHoursFor(value, office);
+    if (!hours) return true;
+    const opening = openingOccurrence(session.startTime, hours.openTime, office.timezone, hours.closeTime, session.startTime);
     const configuredLateAfter = Number(office.lateAfterMinutes);
     const lateAfter = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
     return opening && value >= new Date(opening.getTime() + Math.max(0, lateAfter) * 60_000);
@@ -890,8 +884,9 @@ class AttendanceService {
 
   _isBeforeOpening(value, session) {
     const office = session.office ?? {};
-    if (!office.openTime) return false;
-    const opening = openingOccurrence(session.startTime, office.openTime, office.timezone, office.closeTime, session.startTime);
+    const hours = officeHoursFor(value, office);
+    if (!hours) return true;
+    const opening = openingOccurrence(session.startTime, hours.openTime, office.timezone, hours.closeTime, session.startTime);
     return opening && value < opening;
   }
 
