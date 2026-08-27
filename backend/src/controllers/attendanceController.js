@@ -142,7 +142,7 @@ const getStatus = async (req, res, next) => {
 
 const getHistory = async (req, res, next) => {
   try {
-    const now = new Date();
+    const now = await getCurrentServerTime();
     const organization = await prisma.organization.findUnique({ where: { id: req.user.orgId }, select: { timezone: true } });
     const timezone = organization?.timezone || 'Africa/Lagos';
     // History is an audit view: do not hide older retained records by default.

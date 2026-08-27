@@ -325,10 +325,21 @@ export default function Students() {
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const response = await api.get<unknown>('/admin/students/history?limit=200');
-      const outer = isRecord(response) ? response : {};
-      const data = isRecord(outer.data) ? outer.data : outer;
-      setHistory(Array.isArray(data.records) ? data.records as StudentHistoryRecord[] : []);
+      const firstResponse = await api.get<unknown>('/admin/students/history?page=1&limit=200');
+      const firstOuter = isRecord(firstResponse) ? firstResponse : {};
+      const firstData = isRecord(firstOuter.data) ? firstOuter.data : firstOuter;
+      const firstRecords = Array.isArray(firstData.records) ? firstData.records as StudentHistoryRecord[] : [];
+      const totalPages = Math.max(1, Number(firstData.totalPages) || 1);
+      const remaining = totalPages > 1
+        ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) =>
+            api.get<unknown>(`/admin/students/history?page=${index + 2}&limit=200`).then((response) => {
+              const outer = isRecord(response) ? response : {};
+              const data = isRecord(outer.data) ? outer.data : outer;
+              return Array.isArray(data.records) ? data.records as StudentHistoryRecord[] : [];
+            }),
+          ))
+        : [];
+      setHistory([...firstRecords, ...remaining.flat()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load student history.');
     } finally {

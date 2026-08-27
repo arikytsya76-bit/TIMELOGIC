@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, AlertTriangle, Wifi, Smartphone, Flag, UserCheck, RefreshCw } from 'lucide-react';
 import Header from '../components/Header';
-import { fetchLiveAttendance, fetchAttendanceForDate, fetchMonthlyPenalties, flagRecord, approveRecord } from '../services';
+import { fetchAttendance, fetchLiveAttendance, fetchAttendanceForDate, fetchMonthlyPenalties, flagRecord, approveRecord } from '../services';
 import { useAuth } from '../context/AuthContext';
 
 const STATUS_STYLE: Record<string, string> = {
@@ -30,7 +30,7 @@ export default function Attendance() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
-  const [view, setView] = useState<'today' | 'past'>('today');
+  const [view, setView] = useState<'today' | 'past' | 'all'>('today');
   const [pastDate, setPastDate] = useState('');
   const [monthlyPenalties, setMonthlyPenalties] = useState<any>(null);
 
@@ -39,7 +39,9 @@ export default function Attendance() {
       setError('');
       const next = view === 'today'
         ? await fetchLiveAttendance()
-        : await fetchAttendanceForDate(pastDate);
+        : view === 'all'
+          ? await fetchAttendance()
+          : await fetchAttendanceForDate(pastDate);
       setRecords(next);
       if (view === 'past') setMonthlyPenalties(await fetchMonthlyPenalties(pastDate.slice(0, 7)));
     } catch (err) {
@@ -51,7 +53,7 @@ export default function Attendance() {
   useEffect(() => {
     if (!pastDate && serverNow) setPastDate(serverNow.toLocaleDateString('en-CA', { timeZone: organizationTimezone }));
   }, [pastDate, serverNow, organizationTimezone]);
-  useEffect(() => { if (view === 'today' || pastDate) void load(); if (view !== 'today') return; const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [view, pastDate]);
+  useEffect(() => { if (view === 'today' || view === 'all' || pastDate) void load(); if (view !== 'today') return; const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [view, pastDate]);
 
   const filtered = records.filter((r) => {
     const matchSearch = `${r.employee?.firstName} ${r.employee?.lastName} ${r.employee?.employeeCode}`.toLowerCase().includes(search.toLowerCase());
@@ -80,9 +82,9 @@ export default function Attendance() {
       )} />
       <div className="flex-1 overflow-y-auto p-6">
         {error && <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-        {!loading && !error && records.length > 0 && <p className="mb-3 text-xs font-semibold text-emerald-700">{view === 'today' ? `${records.length} live attendance record${records.length === 1 ? '' : 's'} from the server` : `${records.length} attendance record${records.length === 1 ? '' : 's'} for ${pastDate}`}</p>}
+        {!loading && !error && records.length > 0 && <p className="mb-3 text-xs font-semibold text-emerald-700">{view === 'today' ? `${records.length} live attendance record${records.length === 1 ? '' : 's'} from the server` : view === 'all' ? `${records.length} retained attendance record${records.length === 1 ? '' : 's'} from all past dates` : `${records.length} attendance record${records.length === 1 ? '' : 's'} for ${pastDate}`}</p>}
         <div className="flex items-center gap-2 mb-4">
-          {(['today', 'past'] as const).map((option) => <button key={option} onClick={() => setView(option)} className={`text-xs font-semibold px-3 py-2 rounded-xl ${view === option ? 'bg-primary-700 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>{option === 'today' ? 'Today' : 'Past Attendance'}</button>)}
+          {(['today', 'past', 'all'] as const).map((option) => <button key={option} onClick={() => setView(option)} className={`text-xs font-semibold px-3 py-2 rounded-xl ${view === option ? 'bg-primary-700 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>{option === 'today' ? 'Today' : option === 'past' ? 'Past Date' : 'All History'}</button>)}
           {view === 'past' && <input type="date" value={pastDate} onChange={(e) => setPastDate(e.target.value)} className="border border-slate-200 rounded-xl px-3 py-2 text-sm" />}
         </div>
         <div className="flex items-center gap-3 mb-5">
