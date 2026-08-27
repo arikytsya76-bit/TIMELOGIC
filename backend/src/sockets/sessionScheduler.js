@@ -150,34 +150,6 @@ async function endExpiredSessions(now) {
   }
 }
 
-async function endSessionsAfterCheckInWindow(now) {
-  const sessions = await prisma.attendanceSession.findMany({
-    where: { status: { in: ['ACTIVE', 'PAUSED'] }, startTime: { lte: now } },
-    select: {
-      id: true, sessionName: true, startTime: true, endTime: true,
-      office: { select: { openTime: true, closeTime: true, timezone: true, lateAfterMinutes: true } },
-    },
-  });
-
-  for (const session of sessions) {
-    const opening = session.office?.openTime
-      ? openingOccurrence(session.startTime, session.office.openTime, session.office.timezone, session.office.closeTime, session.startTime)
-      : session.startTime;
-    const configuredLateAfter = Number(session.office?.lateAfterMinutes);
-    const lateAfter = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
-    const checkInDeadline = new Date(opening.getTime() + Math.max(0, lateAfter) * 60_000);
-    if (now < checkInDeadline || (session.endTime && now >= session.endTime)) continue;
-    const changed = await prisma.attendanceSession.updateMany({
-      where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
-      data: { status: 'ENDED' },
-    });
-    if (changed.count) {
-      await QRTokenService.invalidatePrevious(session.id).catch(() => {});
-      logger.info(`Scheduler: closed check-in window for ${session.sessionName}`);
-    }
-  }
-}
-
 async function endSessionsOutsideOfficeHours(now) {
   const sessions = await prisma.attendanceSession.findMany({
     where: { status: { in: ['ACTIVE', 'PAUSED'] } },

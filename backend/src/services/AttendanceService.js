@@ -361,7 +361,8 @@ class AttendanceService {
       return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
     }
 
-    // ── Check-in window: open for CHECKIN_WINDOW_MIN after the session start ──
+    // The session starts AUTO_SESSION_LEAD_MIN before official opening. Keep
+    // accepting check-ins until office close; lateness is applied below.
     // Prevent duplicate check-in on same session/day
     // ── STEP 0: Time-based challenge (anti-automation) ──
     const challenge = await this._verifyChallenge(employeeId, sessionId, challengeCode);
