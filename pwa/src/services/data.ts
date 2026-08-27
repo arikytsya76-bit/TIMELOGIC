@@ -26,7 +26,17 @@ const dev = () => ({ platform: PLATFORM, deviceId: getDeviceId() });
 
 export const getCurrentSession = () => api.get<SessionInfo>("/attendance/current-session");
 export const getStatus = () => api.get<StatusRec | null>(`/attendance/status?_live=${Date.now()}`);
-export const getHistory = () => api.get<HistRec[]>(`/attendance/history?_live=${Date.now()}`);
+export async function getHistory(): Promise<HistRec[]> {
+  const first = await api.get<any>(`/attendance/history?page=1&limit=200&_live=${Date.now()}`);
+  const firstRows = Array.isArray(first) ? first : Array.isArray(first.records) ? first.records : [];
+  const totalPages = Math.max(1, Number(first.totalPages) || 1);
+  if (totalPages === 1) return firstRows;
+  const rest = await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) =>
+    api.get<any>(`/attendance/history?page=${index + 2}&limit=200&_live=${Date.now()}`).then((page) =>
+      Array.isArray(page) ? page : Array.isArray(page.records) ? page.records : []),
+  ));
+  return [...firstRows, ...rest.flat()];
+}
 
 export const requestChallenge = (sessionId: string) =>
   api.post<{ code: string; expiresIn: number }>("/attendance/check-in/challenge", { sessionId, ...dev() });

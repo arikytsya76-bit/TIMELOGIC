@@ -52,14 +52,14 @@ export default function HistoryScreen() {
   const filtered = records.filter((r) => {
     if (filter === 'All') return true;
     if (filter === 'Present') return r.status === 'PRESENT';
-    if (filter === 'Late') return r.status === 'LATE';
+    if (filter === 'Late') return r.status === 'LATE' || r.status === 'COMPLETELY_LATE';
     if (filter === 'Absent') return r.status === 'ABSENT';
     if (filter === 'Leave') return r.status === 'ON_LEAVE';
     return true;
   });
 
   const present = records.filter((r) => r.status === 'PRESENT').length;
-  const late    = records.filter((r) => r.status === 'LATE').length;
+  const late    = records.filter((r) => r.status === 'LATE' || r.status === 'COMPLETELY_LATE').length;
   const absent  = records.filter((r) => r.status === 'ABSENT').length;
 
   return (

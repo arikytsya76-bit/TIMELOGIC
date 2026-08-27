@@ -5,6 +5,7 @@ import { Colors } from '../constants/theme';
 const STATUS_MAP: Record<string, { bg: string; text: string; label: string }> = {
   PRESENT:  { bg: Colors.successBg,  text: Colors.successDark, label: 'Present' },
   LATE:     { bg: Colors.warningBg,  text: Colors.warningDark, label: 'Late' },
+  COMPLETELY_LATE: { bg: Colors.dangerBg, text: Colors.dangerDark, label: 'Completely Late' },
   ABSENT:   { bg: Colors.dangerBg,   text: Colors.dangerDark,  label: 'Absent' },
   ON_LEAVE: { bg: Colors.primaryBg,  text: Colors.primaryDark, label: 'On Leave' },
   HALF_DAY: { bg: Colors.orangeBg,   text: Colors.orange,      label: 'Half Day' },

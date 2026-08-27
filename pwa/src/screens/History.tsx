@@ -26,10 +26,10 @@ export default function History() {
   useEffect(() => { load(); }, [load]);
 
   const present = records.filter((r) => r.status === "PRESENT").length;
-  const late = records.filter((r) => r.status === "LATE").length;
+  const late = records.filter((r) => r.status === "LATE" || r.status === "COMPLETELY_LATE").length;
   const absent = records.filter((r) => r.status === "ABSENT").length;
   const rate = `${Math.round((present / (present + late + absent || 1)) * 100)}%`;
-  const filtered = records.filter((r) => filter === "All" || r.status === MATCH[filter]);
+  const filtered = records.filter((r) => filter === "All" || (filter === "Late" ? r.status === "LATE" || r.status === "COMPLETELY_LATE" : r.status === MATCH[filter]));
 
   const summary = [
     { label: "Present", count: present, color: "#10B981" },

@@ -32,6 +32,7 @@ export const LEAVE_TYPES = [
 export const STATUS_MAP: Record<string, { bg: string; text: string; label: string }> = {
   PRESENT: { bg: "var(--c-success-bg)", text: "var(--c-success-dark)", label: "Present" },
   LATE: { bg: "var(--c-warning-bg)", text: "var(--c-warning-dark)", label: "Late" },
+  COMPLETELY_LATE: { bg: "var(--c-danger-bg)", text: "var(--c-danger-dark)", label: "Completely Late" },
   ABSENT: { bg: "var(--c-danger-bg)", text: "var(--c-danger-dark)", label: "Absent" },
   ON_LEAVE: { bg: "var(--c-primary-bg)", text: "var(--c-primary-dark)", label: "On Leave" },
   HALF_DAY: { bg: "var(--c-orange-bg)", text: "var(--c-orange)", label: "Half Day" },

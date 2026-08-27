@@ -99,10 +99,15 @@ export async function checkOutApi(): Promise<{ checkOutTime: string; totalWorkHo
   };
 }
 
-export async function getHistoryApi(page = 1, limit = 50): Promise<AttendanceRecord[]> {
+export async function getHistoryApi(page = 1, limit = 200): Promise<AttendanceRecord[]> {
   const res = await api.get<any>(`/attendance/history?page=${page}&limit=${limit}&_live=${Date.now()}`);
-  // Backend returns { data: [...] } — fallback to res.records for safety
   const rows: any[] = Array.isArray(res) ? res : Array.isArray((res as any)?.records) ? (res as any).records : Array.isArray((res as any)?.data) ? (res as any).data : [];
+  const totalPages = Math.max(1, Number((res as any)?.totalPages) || 1);
+  const rest = totalPages > 1 ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, index) =>
+    api.get<any>(`/attendance/history?page=${index + 2}&limit=${limit}&_live=${Date.now()}`).then((pageResponse) =>
+      Array.isArray(pageResponse) ? pageResponse : Array.isArray(pageResponse?.records) ? pageResponse.records : Array.isArray(pageResponse?.data) ? pageResponse.data : []),
+  )) : [];
+  rows.push(...rest.flat());
   return rows.map((r: any) => ({
     id: r.id,
     date: r.date,
