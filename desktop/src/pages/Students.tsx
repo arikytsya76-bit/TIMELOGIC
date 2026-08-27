@@ -281,7 +281,6 @@ export default function Students() {
   const { organization } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
   const [total, setTotal] = useState(0);
-    const [sunday, setSunday] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -312,7 +311,6 @@ export default function Students() {
         : [];
       setStudents([...first.rows, ...remaining.flat()]);
       setTotal(first.total);
-      setSunday(first.sunday);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load students.');
     } finally {
@@ -432,12 +430,6 @@ export default function Students() {
             <button onClick={() => void load(true)} className="shrink-0 font-semibold underline underline-offset-2">Retry</button>
           </div>
         )}
-        {sunday && (
-          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            Student attendance is unavailable on Sundays. Check-in returns at 12:00 AM Nigeria time.
-          </div>
-        )}
-
         <div className="mb-5 flex flex-wrap items-center gap-3">
           <button onClick={() => setView('today')} className={`rounded-xl px-3 py-2 text-xs font-semibold ${view === 'today' ? 'bg-primary-700 text-white' : 'border border-[var(--border)] text-[var(--text-main)]'}`}>Today</button>
           <button onClick={() => setView('history')} className={`rounded-xl px-3 py-2 text-xs font-semibold ${view === 'history' ? 'bg-primary-700 text-white' : 'border border-[var(--border)] text-[var(--text-main)]'}`}>Past Attendance</button>
@@ -534,7 +526,7 @@ export default function Students() {
                         <td className="px-4 py-3">
                           {!attendance ? (
                             <button onClick={() => void updateAttendance(student, 'check-in')}
-                              disabled={sunday || student.status !== 'ACTIVE' || attendancePending !== null}
+                              disabled={student.status !== 'ACTIVE' || attendancePending !== null}
                               title={student.status !== 'ACTIVE' ? 'Activate this student before checking in' : 'Record check-in using server time'}
                               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-100 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50">
                               <LogIn size={13} /> {checkInPending ? 'Checking in...' : 'Check In'}

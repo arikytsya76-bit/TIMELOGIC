@@ -6,8 +6,6 @@
  *
  *  openTime - AUTO_SESSION_LEAD_MIN
  *        → auto-create an ACTIVE session if the admin hasn't already.
- *  openTime + office.lateAfterMinutes
- *        → end the check-in session (no more check-ins; check-out still works).
  *  closeTime
  *        → close the work day and allow the auto-checkout sweep to finish open records.
  *  closeTime + AUTO_CHECKOUT_LAG (e.g. 20:40 for a 20:00 close)
@@ -43,7 +41,6 @@ async function tick() {
 
     // Reconcile missed work after a restart, laptop sleep, or delayed timer.
     await endExpiredSessions(now);
-    await endSessionsAfterCheckInWindow(now);
     await endSessionsOutsideOfficeHours(now);
     await autoCheckoutExpired(now);
 

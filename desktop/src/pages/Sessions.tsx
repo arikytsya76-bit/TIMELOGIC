@@ -153,7 +153,7 @@ export default function Sessions() {
                       <span className="flex items-center gap-1"><Users size={11} />{s._count?.attendanceRecords ?? 0} checked in</span>
                       {s.status === 'ACTIVE' && s.endTime && <CountdownTimer endTime={s.endTime} currentTime={currentTime} />}
                       {s.endTime && <span>Ends {formatOfficeTime(s.endTime, s.office?.timezone || 'Africa/Lagos')}</span>}
-                      {s.office?.openTime && <span>Check-in from {s.office.openTime} until {s.office.lateAfterMinutes ?? 40}m after opening</span>}
+                      {s.office?.openTime && <span>Check-in from {s.office.openTime} until office close at {s.office.closeTime ?? 'closing time'}</span>}
                       {s.office?.closeTime && <span>Checkout after {s.office.closeTime}</span>}
                     </div>
                   </div>

@@ -1,0 +1,1 @@
+ALTER TABLE "offices" ADD COLUMN "completelyLatePenalty" INTEGER NOT NULL DEFAULT 0;

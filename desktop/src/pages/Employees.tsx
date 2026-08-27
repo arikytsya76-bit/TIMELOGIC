@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import type { AdminOrganization, EmployeeCheckInMethod } from '../types/api';
 
 const fileUrl = (value: string, cacheKey: string) =>
-  `${value.startsWith('http') ? value : `${SOCKET_URL}${value}`}?v=${encodeURIComponent(cacheKey)}`;
+  `${value.startsWith('http') ? value : `${SOCKET_URL}${value.replace(/^\/api(?=\/uploads\/)/, '')}`}?v=${encodeURIComponent(cacheKey)}`;
 
 const STATUS_STYLE: Record<string, string> = {
   ACTIVE:     'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30',
@@ -440,14 +440,12 @@ export default function Employees() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2.5">
                         {/* Face photo avatar — shows photo if uploaded, initials otherwise */}
-                        {e.profileImageUrl ? (
-                          <img src={fileUrl(e.profileImageUrl, e.updatedAt ?? e.id)} alt="face"
-                            className="w-9 h-9 rounded-full object-cover border-2 border-emerald-500 flex-shrink-0" />
-                        ) : (
-                          <div className="w-9 h-9 rounded-full bg-primary-100 dark:bg-primary-900/40 flex items-center justify-center flex-shrink-0 border-2 border-dashed border-slate-300">
-                            <span className="text-xs font-bold text-primary-700">{e.firstName?.[0]}{e.lastName?.[0]}</span>
-                          </div>
-                        )}
+                        {e.profileImageUrl && <img src={fileUrl(e.profileImageUrl, e.updatedAt ?? e.id)} alt="face"
+                          onError={(event) => { event.currentTarget.style.display = 'none'; event.currentTarget.nextElementSibling?.classList.remove('hidden'); }}
+                          className="w-9 h-9 rounded-full object-cover border-2 border-emerald-500 flex-shrink-0" />}
+                        <div className={`w-9 h-9 rounded-full bg-primary-100 dark:bg-primary-900/40 items-center justify-center flex-shrink-0 border-2 border-dashed border-slate-300 ${e.profileImageUrl ? 'hidden' : 'flex'}`}>
+                          <span className="text-xs font-bold text-primary-700">{e.firstName?.[0]}{e.lastName?.[0]}</span>
+                        </div>
                         <div>
                           <p className="font-semibold text-[var(--text-main)]">{e.firstName} {e.lastName}</p>
                           <p className="text-xs text-[var(--text-muted)]">{e.email}</p>

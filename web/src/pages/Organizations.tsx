@@ -28,7 +28,7 @@ interface OrgFormData {
     name: string; address: string; timezone: string; wifiSSID: string; publicIp: string;
     openTime: string; closeTime: string; breakMinutes: number;
     weeklySchedule: WeeklySchedule;
-    graceMinutes: number; lateAfterMinutes: number; gracePenalty: number; latePenalty: number;
+    graceMinutes: number; lateAfterMinutes: number; gracePenalty: number; latePenalty: number; completelyLatePenalty: number;
     breakStart: string; breakEnd: string;
   }[];
   departments: { name: string; breakStart: string; breakEnd: string }[];
@@ -38,7 +38,7 @@ const newOffice = () => ({
   name: '', address: '', timezone: 'Africa/Lagos', wifiSSID: '', publicIp: '',
   openTime: '08:00', closeTime: '17:00', breakMinutes: 60,
   weeklySchedule: weeklySchedule(),
-  graceMinutes: 30, lateAfterMinutes: 90, gracePenalty: 0, latePenalty: 0,
+  graceMinutes: 30, lateAfterMinutes: 90, gracePenalty: 0, latePenalty: 0, completelyLatePenalty: 0,
   breakStart: '13:00', breakEnd: '14:00',
 });
 const defaultForm = (): OrgFormData => ({
@@ -196,6 +196,7 @@ function OrgModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => vo
                   <div><label className={lbl}>Late after (min from open)</label><input className={inp} type="number" min={0} value={o.lateAfterMinutes} onChange={(e) => updateOffice(i,'lateAfterMinutes',e.target.value)}/></div>
                   <div><label className={lbl}>Penalty after grace (₦)</label><input className={inp} type="number" min={0} value={o.gracePenalty} onChange={(e) => updateOffice(i,'gracePenalty',e.target.value)}/></div>
                   <div><label className={lbl}>Late penalty (₦)</label><input className={inp} type="number" min={0} value={o.latePenalty} onChange={(e) => updateOffice(i,'latePenalty',e.target.value)}/></div>
+                  <div><label className={lbl}>Completely late penalty (₦)</label><input className={inp} type="number" min={0} value={o.completelyLatePenalty} onChange={(e) => updateOffice(i,'completelyLatePenalty',e.target.value)}/></div>
                 </div>
                 <p className="text-[11px] text-[var(--text-muted)] mt-1">Deducted from salary. On-time within grace = ₦0. After grace = grace penalty. After "late after" = marked LATE + late penalty.</p>
               </div>
@@ -288,7 +289,7 @@ function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () => void
     wifiSSID: o.wifiSSID ?? '', publicIp: o.publicIp ?? '', openTime: o.openTime ?? '08:00', closeTime: o.closeTime ?? '17:00',
     breakMinutes: o.breakMinutes ?? 60,
     graceMinutes: o.graceMinutes ?? 30, lateAfterMinutes: o.lateAfterMinutes ?? 90,
-    gracePenalty: o.gracePenalty ?? 0, latePenalty: o.latePenalty ?? 0,
+    gracePenalty: o.gracePenalty ?? 0, latePenalty: o.latePenalty ?? 0, completelyLatePenalty: o.completelyLatePenalty ?? 0,
     breakStart: o.breakStart ?? '13:00', breakEnd: o.breakEnd ?? '14:00',
     weeklySchedule: o.weeklySchedule ?? weeklySchedule(o.openTime ?? '08:00', o.closeTime ?? '17:00'),
   })));
@@ -390,6 +391,7 @@ function EditOrgModal({ org, onClose, onSaved }: { org: any; onClose: () => void
                 <div><label className={lbl}>Late after (min from open)</label><input className={inp} type="number" min={0} value={o.lateAfterMinutes} onChange={(e) => updOffice(i,'lateAfterMinutes',e.target.value)}/></div>
                 <div><label className={lbl}>Penalty after grace (₦)</label><input className={inp} type="number" min={0} value={o.gracePenalty} onChange={(e) => updOffice(i,'gracePenalty',e.target.value)}/></div>
                 <div><label className={lbl}>Late penalty (₦)</label><input className={inp} type="number" min={0} value={o.latePenalty} onChange={(e) => updOffice(i,'latePenalty',e.target.value)}/></div>
+                <div><label className={lbl}>Completely late penalty (₦)</label><input className={inp} type="number" min={0} value={o.completelyLatePenalty} onChange={(e) => updOffice(i,'completelyLatePenalty',e.target.value)}/></div>
                 <div><label className={lbl}>Break Start</label><input className={inp} type="time" value={o.breakStart} onChange={(e) => updOffice(i,'breakStart',e.target.value)}/></div>
                 <div><label className={lbl}>Break End</label><input className={inp} type="time" value={o.breakEnd} onChange={(e) => updOffice(i,'breakEnd',e.target.value)}/></div>
               </div>

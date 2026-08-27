@@ -25,6 +25,7 @@ enum UserStatus {
 enum AttendanceStatus {
   PRESENT
   LATE
+  COMPLETELY_LATE
   ABSENT
   HALF_DAY
   ON_LEAVE
@@ -175,6 +176,7 @@ model Office {
   lateAfterMinutes   Int     @default(90) // minutes after open when status becomes LATE
   gracePenalty       Int     @default(0) // ₦ deducted: checked in after grace, before late
   latePenalty        Int     @default(0) // ₦ deducted: checked in after the late threshold
+  completelyLatePenalty Int  @default(0) // ₦ deducted: checked in after the late threshold
   autoSessionMinutes Int     @default(60) // duration of an auto-created session (minutes)
   // ── Break window (employees may only break within this window) ──
   breakStart         String? // break window start (HH:MM), null = no window

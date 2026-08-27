@@ -15,7 +15,7 @@ const listOrgs = async (req, res, next) => {
           select: {
             id: true, name: true, address: true, timezone: true, isActive: true,
             wifiSSID: true, publicIp: true, openTime: true, closeTime: true, weeklySchedule: true, breakMinutes: true,
-            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true, completelyLatePenalty: true,
             autoSessionMinutes: true, breakStart: true, breakEnd: true,
             securitySettings: { select: { id: true } },
             _count: { select: { sessions: true } },
@@ -104,6 +104,7 @@ const createOrg = async (req, res, next) => {
               lateAfterMinutes:   Number.isFinite(+o.lateAfterMinutes)   ? parseInt(o.lateAfterMinutes, 10)   : 90,
               gracePenalty:       Number.isFinite(+o.gracePenalty)       ? parseInt(o.gracePenalty, 10)       : 0,
               latePenalty:        Number.isFinite(+o.latePenalty)        ? parseInt(o.latePenalty, 10)        : 0,
+              completelyLatePenalty: Number.isFinite(+o.completelyLatePenalty) ? parseInt(o.completelyLatePenalty, 10) : 0,
               autoSessionMinutes: Number.isFinite(+o.autoSessionMinutes) ? parseInt(o.autoSessionMinutes, 10) : 60,
               weeklySchedule: o.weeklySchedule || null,
               breakStart: o.breakStart || null,
@@ -267,6 +268,7 @@ const updateOrg = async (req, res, next) => {
         if (o.lateAfterMinutes !== undefined)   data.lateAfterMinutes   = parseInt(o.lateAfterMinutes, 10) || 0;
         if (o.gracePenalty !== undefined)       data.gracePenalty       = parseInt(o.gracePenalty, 10) || 0;
         if (o.latePenalty !== undefined)        data.latePenalty        = parseInt(o.latePenalty, 10) || 0;
+        if (o.completelyLatePenalty !== undefined) data.completelyLatePenalty = parseInt(o.completelyLatePenalty, 10) || 0;
         if (o.autoSessionMinutes !== undefined) data.autoSessionMinutes = parseInt(o.autoSessionMinutes, 10) || 60;
         if (o.breakStart !== undefined) data.breakStart = o.breakStart || null;
         if (o.breakEnd   !== undefined) data.breakEnd   = o.breakEnd   || null;
@@ -420,6 +422,7 @@ const updateOfficeSecurity = async (req, res, next) => {
     if (b.lateAfterMinutes !== undefined)   officeData.lateAfterMinutes   = parseInt(b.lateAfterMinutes, 10) || 0;
     if (b.gracePenalty !== undefined)       officeData.gracePenalty       = parseInt(b.gracePenalty, 10) || 0;
     if (b.latePenalty !== undefined)        officeData.latePenalty        = parseInt(b.latePenalty, 10) || 0;
+    if (b.completelyLatePenalty !== undefined) officeData.completelyLatePenalty = parseInt(b.completelyLatePenalty, 10) || 0;
     if (b.autoSessionMinutes !== undefined) officeData.autoSessionMinutes = parseInt(b.autoSessionMinutes, 10) || 60;
     if (b.breakStart !== undefined) officeData.breakStart = b.breakStart || null;
     if (b.breakEnd   !== undefined) officeData.breakEnd   = b.breakEnd   || null;
@@ -431,7 +434,7 @@ const updateOfficeSecurity = async (req, res, next) => {
     const {
       id, officeId: _o, createdAt, updatedAt, updatedBy: _u,
       wifiSSID: _w, publicIp: _pi, openTime: _ot, closeTime: _ct, breakMinutes: _bm,
-      graceMinutes: _g, lateAfterMinutes: _la, gracePenalty: _gp, latePenalty: _lp,
+      graceMinutes: _g, lateAfterMinutes: _la, gracePenalty: _gp, latePenalty: _lp, completelyLatePenalty: _clp,
       autoSessionMinutes: _as, breakStart: _bs, breakEnd: _be,
       ...settingsData
     } = req.body;

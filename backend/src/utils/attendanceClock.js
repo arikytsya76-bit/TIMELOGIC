@@ -66,7 +66,6 @@ function officeHoursFor(value, office = {}) {
     if (!day || !day.openTime || !day.closeTime) return null;
     return { openTime: day.openTime, closeTime: day.closeTime };
   }
-  if (key === 'sunday') return null;
   return office.openTime && office.closeTime
     ? { openTime: office.openTime, closeTime: office.closeTime }
     : null;

@@ -25,6 +25,7 @@ const organizationPolicyValidators = [
   body('offices.*.lateAfterMinutes').optional().isInt({ min: 1 }).withMessage('lateAfterMinutes must be at least 1 minute'),
   body('offices.*.gracePenalty').optional().isInt({ min: 0 }),
   body('offices.*.latePenalty').optional().isInt({ min: 0 }),
+  body('offices.*.completelyLatePenalty').optional().isInt({ min: 0 }),
   body('offices').optional().custom((offices) => {
     for (const office of offices || []) {
       if (Number(office.lateAfterMinutes ?? 90) < Number(office.graceMinutes ?? 30)) {

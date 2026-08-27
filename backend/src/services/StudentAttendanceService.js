@@ -1,13 +1,19 @@
 const { v4: uuidv4 } = require('uuid');
 const { prisma } = require('../config/database');
-const { dateOnly, isSunday } = require('../utils/attendanceClock');
+const { dateOnly, officeHoursFor } = require('../utils/attendanceClock');
 const { getCurrentServerTime } = require('../utils/networkTime');
 
 class StudentAttendanceService {
   async _organization(orgId, requireEnabled = true) {
     const organization = await prisma.organization.findUnique({
       where: { id: orgId },
-      select: { id: true, name: true, hasStudents: true, timezone: true },
+      select: {
+        id: true, name: true, hasStudents: true, timezone: true,
+        offices: {
+          where: { isActive: true }, orderBy: { createdAt: 'asc' }, take: 1,
+          select: { openTime: true, closeTime: true, timezone: true, weeklySchedule: true },
+        },
+      },
     });
     if (!organization) throw Object.assign(new Error('Organization not found.'), { status: 404 });
     if (requireEnabled && !organization.hasStudents) {
@@ -20,7 +26,10 @@ class StudentAttendanceService {
     const organization = await this._organization(orgId);
     const now = await getCurrentServerTime();
     const today = dateOnly(now, organization.timezone);
-    const sunday = isSunday(now, organization.timezone);
+    const office = organization.offices[0] ?? { timezone: organization.timezone };
+    // Student attendance is an administrator station workflow and remains
+    // available on Sundays; the employee schedule must not disable this tab.
+    const sunday = false;
     const safePage = Math.max(1, Number(page) || 1);
     const safeLimit = Math.min(200, Math.max(1, Number(limit) || 100));
     const where = {
@@ -72,7 +81,7 @@ class StudentAttendanceService {
       enabled: true,
       organization,
       sunday,
-      message: sunday ? 'Student attendance is unavailable on Sundays.' : null,
+      message: sunday ? 'Student attendance is unavailable today because this office is closed.' : null,
       serverTime: now,
       students: students.map((student) => ({
         ...student,
@@ -156,9 +165,7 @@ class StudentAttendanceService {
     });
     if (!student) throw Object.assign(new Error('Active student not found.'), { status: 404 });
     const checkInTime = await getCurrentServerTime();
-    if (isSunday(checkInTime, organization.timezone)) {
-      throw Object.assign(new Error('Student attendance is not recorded on Sundays.'), { status: 400 });
-    }
+    const office = organization.offices[0] ?? { timezone: organization.timezone };
     const date = dateOnly(checkInTime, organization.timezone);
     const existingOpen = await prisma.studentAttendance.findFirst({
       where: { studentId: student.id, checkOutTime: null }, select: { id: true },

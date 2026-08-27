@@ -61,7 +61,10 @@ function createApp() {
   // Static file serving (uploaded profile images). UPLOAD_DIR may be absolute
   // (production persistent disk) or relative (dev).
   const _up = env.UPLOAD_DIR || 'uploads';
-  app.use('/uploads', express.static(path.isAbsolute(_up) ? _up : path.join(process.cwd(), _up)));
+  const uploadRoot = path.isAbsolute(_up) ? _up : path.resolve(__dirname, '../../', _up);
+  app.use('/uploads', express.static(uploadRoot, {
+    setHeaders: (res) => res.set('Cache-Control', 'no-store'),
+  }));
 
   // Global per-IP rate limit (anti-DDoS / abuse). The login route has its own
   // stricter brute-force limiter (see routes/auth.js → authLimiter).

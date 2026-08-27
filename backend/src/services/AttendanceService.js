@@ -36,12 +36,6 @@ class AttendanceService {
     if (session.office.orgId !== employee.orgId) {
       return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
     }
-    if (this._isBeforeOpening(challengeTime, session)) {
-      return { success: false, reason: 'SESSION_CLOSED', message: 'Check-in opens at the organisation opening time.' };
-    }
-    if (this._isAfterCheckInDeadline(challengeTime, session)) {
-      return { success: false, reason: 'CHECKIN_CLOSED', message: 'The check-in window has closed for today.' };
-    }
 
     // Gate: must be on the company Wi-Fi BEFORE we reveal a code
     const wifi = this._checkWifi(session.office, ctx, employeeId);
@@ -154,7 +148,7 @@ class AttendanceService {
             id: true, openingTime: true, timezone: true,
             offices: {
               where: { isActive: true }, orderBy: { createdAt: 'asc' }, take: 1,
-              select: { id: true, closeTime: true, graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true },
+              select: { id: true, closeTime: true, graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true, completelyLatePenalty: true },
             },
           },
         },
@@ -348,7 +342,7 @@ class AttendanceService {
           select: {
             id: true, orgId: true, name: true, isActive: true, timezone: true,
             wifiSSID: true, publicIp: true, openTime: true, closeTime: true, weeklySchedule: true,
-            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true, completelyLatePenalty: true,
             securitySettings: true,
           },
         },
@@ -364,12 +358,6 @@ class AttendanceService {
     if (!officeHoursFor(clockInTime, session.office)) return { success: false, reason: 'SUNDAY_CLOSED', message: 'This office is closed today.' };
     if (session.office.orgId !== employee.orgId) {
       return { success: false, reason: 'SESSION_CLOSED', message: 'This attendance session does not belong to your organization.' };
-    }
-    if (this._isBeforeOpening(clockInTime, session)) {
-      return { success: false, reason: 'SESSION_CLOSED', message: 'Check-in opens at the organisation opening time.' };
-    }
-    if (this._isAfterCheckInDeadline(clockInTime, session)) {
-      return { success: false, reason: 'CHECKIN_CLOSED', message: 'The check-in window has closed for today.' };
     }
 
     // ── Check-in window: open for CHECKIN_WINDOW_MIN after the session start ──
@@ -501,7 +489,7 @@ class AttendanceService {
         office: {
           select: {
             id: true, name: true, timezone: true, openTime: true, closeTime: true,
-            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true, completelyLatePenalty: true,
           },
         },
       },
@@ -611,12 +599,6 @@ class AttendanceService {
     }
     const session = await this._loadManualSession(sessionId, adminOrgId, clockInTime);
     if (!officeHoursFor(clockInTime, session.office)) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
-    if (this._isBeforeOpening(clockInTime, session)) {
-      throw Object.assign(new Error('Check-in opens at the organisation opening time.'), { status: 400, reason: 'CHECKIN_NOT_OPEN' });
-    }
-    if (this._isAfterCheckInDeadline(clockInTime, session)) {
-      throw Object.assign(new Error('The check-in window has closed for today.'), { status: 400, reason: 'CHECKIN_CLOSED' });
-    }
     const { status, penalty } = this._computeStatusAndPenalty(clockInTime, session);
     const record = await this._persistCheckIn({
       employeeId, sessionId, date: attendanceDate(clockInTime, {
@@ -858,18 +840,19 @@ class AttendanceService {
   // starts at openTime + graceMinutes (e.g. open 07:00 + grace 50 → penalties at 07:50).
   //  ≤ graceMinutes after open      → PRESENT, no penalty
   //  ≤ lateAfterMinutes after open  → PRESENT, gracePenalty (₦ off salary)
-  //  > lateAfterMinutes after open  → LATE,    latePenalty  (₦ off salary)
+  //  > lateAfterMinutes after open  → COMPLETELY_LATE, latePenalty (₦ off salary)
   _computeStatusAndPenalty(clockInTime, session) {
     const o = session.office ?? {};
     if (!o.openTime) {
       const minutes = (clockInTime.getTime() - session.startTime.getTime()) / 60000;
       if (minutes <= (o.graceMinutes ?? 30)) return { status: 'PRESENT', penalty: 0, minutesLate: Math.max(0, Math.floor(minutes)) };
       if (minutes <= (o.lateAfterMinutes ?? 90)) return { status: 'PRESENT', penalty: o.gracePenalty ?? 0, minutesLate: Math.floor(minutes) };
-      return { status: 'LATE', penalty: o.latePenalty ?? 0, minutesLate: Math.floor(minutes) };
+      return { status: 'COMPLETELY_LATE', penalty: o.completelyLatePenalty ?? o.latePenalty ?? 0, minutesLate: Math.floor(minutes) };
     }
     const configuredLateAfter = Number(o.lateAfterMinutes);
     const lateAfterMinutes = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
-    return evaluateAttendance(clockInTime, { ...o, lateAfterMinutes, openingReference: session.startTime });
+    const result = evaluateAttendance(clockInTime, { ...o, lateAfterMinutes, openingReference: session.startTime });
+    return result.status === 'LATE' ? { ...result, status: 'COMPLETELY_LATE', penalty: o.completelyLatePenalty ?? o.latePenalty ?? 0 } : result;
   }
 
   _isAfterCheckInDeadline(value, session) {
