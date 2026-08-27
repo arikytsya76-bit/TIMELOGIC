@@ -184,6 +184,12 @@ const getSecuritySettings = async (req, res, next) => {
 
 const updateSecuritySettings = async (req, res, next) => {
   try {
+    const ownedOffice = await prisma.office.findFirst({
+      where: { id: req.params.officeId, orgId: req.user.orgId },
+      select: { id: true },
+    });
+    if (!ownedOffice) return res.status(404).json({ success: false, message: 'Office not found.' });
+
     // Office-level field: Wi-Fi SSID lives on the Office model
     const { wifiSSID } = req.body;
     if (wifiSSID !== undefined) {
@@ -200,12 +206,12 @@ const updateSecuritySettings = async (req, res, next) => {
     } = req.body;
 
     const settings = await prisma.securitySettings.upsert({
-      where:  { officeId: req.params.officeId },
+      where:  { officeId: ownedOffice.id },
       update: settingsData,
-      create: { id: uuidv4(), officeId: req.params.officeId, ...settingsData },
+      create: { id: uuidv4(), officeId: ownedOffice.id, ...settingsData },
     });
 
-    const office = await prisma.office.findUnique({ where: { id: req.params.officeId } });
+    const office = await prisma.office.findUnique({ where: { id: ownedOffice.id } });
     res.json({ success: true, data: { settings, office } });
   } catch (err) { next(err); }
 };
