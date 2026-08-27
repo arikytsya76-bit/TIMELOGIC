@@ -66,6 +66,7 @@ class StudentAttendanceService {
     const openAttendance = students.length ? await prisma.studentAttendance.findMany({
       where: {
         studentId: { in: students.map((student) => student.id) },
+        date: today,
         checkOutTime: null,
       },
       orderBy: { checkInTime: 'desc' },

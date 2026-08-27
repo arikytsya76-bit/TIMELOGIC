@@ -804,7 +804,7 @@ class ReportService {
     });
 
     const totalPresent  = records.filter((r) => r.status === 'PRESENT').length;
-    const totalLate     = records.filter((r) => r.status === 'LATE').length;
+    const totalLate     = records.filter((r) => r.status === 'LATE' || r.status === 'COMPLETELY_LATE').length;
     const totalAbsent   = records.filter((r) => r.status === 'ABSENT').length;
     const totalOnLeave  = records.filter((r) => r.status === 'ON_LEAVE').length;
     const totalFlagged  = records.filter((r) => r.flagged).length;

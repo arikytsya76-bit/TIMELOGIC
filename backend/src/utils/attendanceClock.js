@@ -75,13 +75,11 @@ function officeHoursFor(value, office = {}) {
     }
     const day = parsedSchedule[scheduleKey];
     if (day === null || day === false || day === '') return null;
-    if (!day || typeof day !== 'object') {
-      return fallbackOpen && fallbackClose ? { openTime: fallbackOpen, closeTime: fallbackClose } : null;
-    }
+    if (!day || typeof day !== 'object') return null;
     const openTime = day.openTime || day.open || day.startTime;
     const closeTime = day.closeTime || day.close || day.endTime;
     if (!openTime && !closeTime) return null;
-    return openTime && closeTime ? { openTime, closeTime } : (fallbackOpen && fallbackClose ? { openTime: fallbackOpen, closeTime: fallbackClose } : null);
+    return openTime && closeTime ? { openTime, closeTime } : null;
   }
   return fallbackOpen && fallbackClose
     ? { openTime: fallbackOpen, closeTime: fallbackClose }

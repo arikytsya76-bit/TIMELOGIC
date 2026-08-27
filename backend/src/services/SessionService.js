@@ -270,7 +270,7 @@ class SessionService {
       if (previousOpening) {
         openAt.setTime(previousOpening.getTime());
       }
-      closeAt = atZonedTime(now, session.office.closeTime, session.office.timezone, 1);
+      closeAt = atZonedTime(now, hours.closeTime, session.office.timezone, 1);
     }
 
     if (!openAt || !closeAt || now < openAt || now >= closeAt) {
