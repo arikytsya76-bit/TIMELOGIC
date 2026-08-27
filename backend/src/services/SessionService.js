@@ -25,12 +25,12 @@ class SessionService {
     // Snapshot office + org name and read the office work hours
     const office = await prisma.office.findUnique({
       where: { id: officeId },
-      select: { orgId: true, name: true, openTime: true, closeTime: true, weeklySchedule: true, timezone: true, organization: { select: { name: true } } },
+      select: { orgId: true, name: true, openTime: true, closeTime: true, weeklySchedule: true, timezone: true, organization: { select: { name: true, openingTime: true } } },
     });
     if (!office || office.orgId !== admin.orgId) throw Object.assign(new Error('Office not found'), { status: 404 });
 
     const now      = await getCurrentServerTime();
-    const hours = officeHoursFor(now, office);
+    const hours = officeHoursFor(now, { ...office, organizationOpeningTime: office.organization?.openingTime });
     if (!hours) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
     const openMin  = this._toMinutes(hours.openTime);
     const closeMin = this._toMinutes(hours.closeTime);

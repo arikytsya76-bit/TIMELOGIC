@@ -52,7 +52,10 @@ async function tick() {
     for (const org of orgs) {
       for (const office of org.offices) {
         const local = zonedParts(now, office.timezone);
-        const hours = officeHoursFor(now, office);
+        const hours = officeHoursFor(now, {
+          ...office,
+          organizationOpeningTime: org.openingTime,
+        });
         if (!hours) continue;
         const minOfDay = local.hour * 60 + local.minute;
         const openMin  = toMinutes(hours.openTime);
@@ -92,7 +95,7 @@ async function autoCreate(org, office, now, openAt, closeAt) {
       // Do not recreate an ended session after its check-in window expires.
       // The stored endTime remains the office close so open records can still
       // be checked out until closing/automatic checkout.
-      startTime: { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000), lt: closeAt },
+      startTime: { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 40) * 60_000), lt: closeAt },
     },
     select: { id: true },
   });

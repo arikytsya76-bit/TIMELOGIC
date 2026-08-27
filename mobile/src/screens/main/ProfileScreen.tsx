@@ -13,7 +13,7 @@ import { getLeaveBalances, LeaveBalance } from '../../services/leaveService';
 import StatusBadge from '../../components/StatusBadge';
 
 import { SOCKET_URL } from '../../config';
-const API_BASE = SOCKET_URL; // real IP — works on phone, not localhost
+const API_BASE = SOCKET_URL; // Uses the deployed backend origin for uploaded files.
 
 export default function ProfileScreen() {
   const { user, logout } = useAuth();

@@ -41,8 +41,7 @@ type Organization = {
   departments: { id: string; name: string }[];
 };
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '');
-if (!configuredApiUrl) throw new Error('VITE_API_URL is required.');
-const API = `${configuredApiUrl}/register`;
+const API = `${configuredApiUrl || 'https://timelogic.onrender.com/api'}/register`;
 const zones = [
   "Africa/Lagos",
   "Africa/Accra",
