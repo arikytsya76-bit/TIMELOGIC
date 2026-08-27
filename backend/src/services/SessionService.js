@@ -7,6 +7,8 @@ const logger = require('../config/logger');
 const { atZonedTime, zonedParts, isSunday, officeHoursFor } = require('../utils/attendanceClock');
 const { getCurrentServerTime } = require('../utils/networkTime');
 
+const sessionLeadMinutes = () => Math.max(0, Number(env.AUTO_SESSION_LEAD_MIN) || 40);
+
 // Implements the State pattern for AttendanceSession lifecycle.
 const VALID_TRANSITIONS = {
   SCHEDULED: ['ACTIVE'],
@@ -47,7 +49,7 @@ class SessionService {
         if (localMin < closeMin) openAt = atZonedTime(now, hours.openTime, office.timezone, -1);
         else closeAt = atZonedTime(now, hours.closeTime, office.timezone, 1);
       }
-      const createAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 40) * 60_000);
+      const createAt = new Date(openAt.getTime() - sessionLeadMinutes() * 60_000);
       if (now < createAt) {
         throw Object.assign(
           new Error(`Too early. Sessions can be created from ${hours.openTime} (${office.timezone}), up to ${Number(env.AUTO_SESSION_LEAD_MIN) || 40} minutes before opening.`),
@@ -69,7 +71,7 @@ class SessionService {
         // A workday may have only one session, even after its check-in window
         // has ended. The next session belongs to the next office workday.
         startTime: {
-          ...(openAt ? { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000) } : {}),
+          ...(openAt ? { gte: new Date(openAt.getTime() - sessionLeadMinutes() * 60_000) } : {}),
           ...(closeAt ? { lt: closeAt } : {}),
         },
       },
@@ -82,8 +84,7 @@ class SessionService {
       );
     }
 
-    // Session runs from now until the office close time
-    const start  = now;
+    const start = openAt ? new Date(openAt.getTime() - sessionLeadMinutes() * 60_000) : now;
     let autoEnd = (closeMin != null) ? atZonedTime(now, hours.closeTime, office.timezone) : new Date(start.getTime() + 8 * 3600 * 1000);
     if (autoEnd <= start && closeMin != null) autoEnd = atZonedTime(now, hours.closeTime, office.timezone, 1);
 
@@ -263,7 +264,7 @@ class SessionService {
     const closeMin = this._toMinutes(hours.closeTime);
     const local = zonedParts(now, session.office.timezone);
     if (closeMin <= openMin && local.hour * 60 + local.minute < closeMin) {
-      const previousOpening = atZonedTime(now, session.office.openTime, session.office.timezone, -1);
+      const previousOpening = atZonedTime(now, hours.openTime, session.office.timezone, -1);
       if (previousOpening) {
         openAt.setTime(previousOpening.getTime());
       }

@@ -26,6 +26,8 @@ const { getCurrentServerTime } = require('../utils/networkTime');
 let _timer = null;
 let _lastMinute = -1;
 
+const sessionLeadMinutes = () => Math.max(0, Number(env.AUTO_SESSION_LEAD_MIN) || 40);
+
 function toMinutes(hhmm) {
   if (!hhmm || typeof hhmm !== 'string') return null;
   const [h, m] = hhmm.split(':').map((x) => parseInt(x, 10));
@@ -68,7 +70,7 @@ async function tick() {
           if (minOfDay < closeMin) openAt = atZonedTime(now, hours.openTime, office.timezone, -1);
           else closeAt = atZonedTime(now, hours.closeTime, office.timezone, 1);
         }
-        const autoCreateAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+        const autoCreateAt = new Date(openAt.getTime() - sessionLeadMinutes() * 60_000);
         if (now >= autoCreateAt && now < closeAt) await autoCreate(org, office, now, openAt, closeAt);
       }
 
@@ -95,7 +97,7 @@ async function autoCreate(org, office, now, openAt, closeAt) {
       // Do not recreate an ended session after its check-in window expires.
       // The stored endTime remains the office close so open records can still
       // be checked out until closing/automatic checkout.
-      startTime: { gte: new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 40) * 60_000), lt: closeAt },
+      startTime: { gte: new Date(openAt.getTime() - sessionLeadMinutes() * 60_000), lt: closeAt },
     },
     select: { id: true },
   });
@@ -108,7 +110,7 @@ async function autoCreate(org, office, now, openAt, closeAt) {
     where: { orgId: org.id, role: 'ADMIN', status: 'ACTIVE' }, select: { id: true },
   });
 
-  const startTime = new Date((openAt || now).getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+  const startTime = new Date((openAt || now).getTime() - sessionLeadMinutes() * 60_000);
   let endTime = closeAt || atZonedTime(now, office.closeTime || '17:00', office.timezone);
   if (endTime <= startTime) endTime = atZonedTime(now, office.closeTime || '17:00', office.timezone, 1);
   if (endTime <= startTime) return;
@@ -163,10 +165,6 @@ async function endSessionsOutsideOfficeHours(now) {
   });
 
   for (const session of sessions) {
-    const openMin = toMinutes(session.office?.openTime);
-    const closeMin = toMinutes(session.office?.closeTime);
-    if (openMin == null || closeMin == null) continue;
-
     const local = zonedParts(now, session.office.timezone);
     const hours = officeHoursFor(now, session.office);
     if (!hours) {
@@ -178,6 +176,9 @@ async function endSessionsOutsideOfficeHours(now) {
       logger.info(`Scheduler: ended Sunday session ${session.sessionName}`);
       continue;
     }
+    const openMin = toMinutes(hours.openTime);
+    const closeMin = toMinutes(hours.closeTime);
+    if (openMin == null || closeMin == null) continue;
     const localMin = local.hour * 60 + local.minute;
     let openAt = atZonedTime(now, hours.openTime, session.office.timezone);
     let closeAt = atZonedTime(now, hours.closeTime, session.office.timezone);
@@ -189,7 +190,7 @@ async function endSessionsOutsideOfficeHours(now) {
       }
     }
 
-    const autoCreateAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 25) * 60_000);
+    const autoCreateAt = new Date(openAt.getTime() - sessionLeadMinutes() * 60_000);
     if (now < autoCreateAt || now >= closeAt) {
       await prisma.attendanceSession.updateMany({
         where: { id: session.id, status: { in: ['ACTIVE', 'PAUSED'] } },
