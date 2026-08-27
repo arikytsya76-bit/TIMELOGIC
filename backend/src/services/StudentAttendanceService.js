@@ -25,8 +25,9 @@ class StudentAttendanceService {
   async list(orgId, { search = '', status = 'ALL', page = 1, limit = 100 } = {}) {
     const organization = await this._organization(orgId);
     const now = await getCurrentServerTime();
-    const today = dateOnly(now, organization.timezone);
     const office = organization.offices[0] ?? { timezone: organization.timezone };
+      const attendanceTimezone = office.timezone || organization.timezone;
+      const today = dateOnly(now, attendanceTimezone);
     // Student attendance is an administrator station workflow and remains
     // available on Sundays; the employee schedule must not disable this tab.
     const sunday = false;
@@ -166,7 +167,7 @@ class StudentAttendanceService {
     if (!student) throw Object.assign(new Error('Active student not found.'), { status: 404 });
     const checkInTime = await getCurrentServerTime();
     const office = organization.offices[0] ?? { timezone: organization.timezone };
-    const date = dateOnly(checkInTime, organization.timezone);
+      const date = dateOnly(checkInTime, office.timezone || organization.timezone);
     const existingOpen = await prisma.studentAttendance.findFirst({
       where: { studentId: student.id, checkOutTime: null }, select: { id: true },
     });

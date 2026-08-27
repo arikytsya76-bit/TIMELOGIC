@@ -712,7 +712,7 @@ class AttendanceService {
         office: {
           select: {
             id: true, orgId: true, isActive: true, timezone: true, openTime: true, closeTime: true, weeklySchedule: true,
-            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true,
+            graceMinutes: true, lateAfterMinutes: true, gracePenalty: true, latePenalty: true, completelyLatePenalty: true,
           },
         },
       },

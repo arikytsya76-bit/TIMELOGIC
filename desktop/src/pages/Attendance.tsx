@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 const STATUS_STYLE: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
   LATE: 'bg-amber-100 text-amber-700',
+  COMPLETELY_LATE: 'bg-red-100 text-red-700',
   ABSENT: 'bg-red-100 text-red-700',
   ON_LEAVE: 'bg-violet-100 text-violet-700',
 };
@@ -89,7 +90,7 @@ export default function Attendance() {
             <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or employee code..." className="w-full pl-9 pr-4 py-2.5 border border-slate-200 rounded-xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500" />
           </div>
-          {['All', 'PRESENT', 'LATE', 'ABSENT', 'ON_LEAVE'].map((s) => (
+            {(['All', 'PRESENT', 'LATE', 'COMPLETELY_LATE', 'ABSENT', 'ON_LEAVE'] as const).map((s) => (
             <button key={s} onClick={() => setFilter(s)} className={`text-xs font-semibold px-3 py-2 rounded-xl transition ${filter === s ? 'bg-primary-700 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{s.replace('_', ' ')}</button>
           ))}
         </div>

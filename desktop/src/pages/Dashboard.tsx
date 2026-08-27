@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 const STATUS_COLORS: Record<string, string> = {
   PRESENT: 'bg-emerald-100 text-emerald-700',
   LATE: 'bg-amber-100 text-amber-700',
+  COMPLETELY_LATE: 'bg-red-100 text-red-700',
   ABSENT: 'bg-red-100 text-red-700',
   ON_LEAVE: 'bg-primary-100 text-primary-700',
 };
