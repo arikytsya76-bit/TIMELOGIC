@@ -33,7 +33,9 @@ class SessionService {
 
     const now      = await getCurrentServerTime();
     const hours = officeHoursFor(now, { ...office, organizationOpeningTime: office.organization?.openingTime });
-    if (!hours) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
+    if (!hours) {
+      throw Object.assign(new Error(`This office has no working hours configured for ${new Intl.DateTimeFormat('en-US', { timeZone: office.timezone || 'Africa/Lagos', weekday: 'long' }).format(now)}.`), { status: 400 });
+    }
     const openMin  = this._toMinutes(hours.openTime);
     const closeMin = this._toMinutes(hours.closeTime);
     let openAt = null;

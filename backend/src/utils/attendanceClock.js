@@ -63,14 +63,17 @@ function officeHoursFor(value, office = {}) {
   const schedule = office.weeklySchedule;
   const fallbackOpen = office.openTime || office.organizationOpeningTime;
   const fallbackClose = office.closeTime || '17:00';
-  if (schedule && typeof schedule === 'object' && !Array.isArray(schedule)) {
-    const scheduleKey = Object.keys(schedule).find((candidate) => candidate.toLowerCase() === key);
+  const parsedSchedule = typeof schedule === 'string'
+    ? (() => { try { return JSON.parse(schedule); } catch { return null; } })()
+    : schedule;
+  if (parsedSchedule && typeof parsedSchedule === 'object' && !Array.isArray(parsedSchedule)) {
+    const scheduleKey = Object.keys(parsedSchedule).find((candidate) => String(candidate).trim().toLowerCase() === key);
     if (scheduleKey === undefined) {
       return fallbackOpen && fallbackClose
         ? { openTime: fallbackOpen, closeTime: fallbackClose }
         : null;
     }
-    const day = schedule[scheduleKey];
+    const day = parsedSchedule[scheduleKey];
     if (day === null || day === false || day === '') return null;
     if (!day || typeof day !== 'object') {
       return fallbackOpen && fallbackClose ? { openTime: fallbackOpen, closeTime: fallbackClose } : null;
