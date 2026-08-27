@@ -38,6 +38,7 @@ function parseTimeApiDateTime(payload) {
 let clockOffsetMs = 0;
 let lastSyncAt = 0;
 let syncPromise = null;
+const MAX_CLOCK_DRIFT_MS = 5 * 60 * 1000;
 
 function getHttpResponse(url) {
   return new Promise((resolve, reject) => {
@@ -104,7 +105,10 @@ async function getCurrentServerTime() {
   if (!syncPromise) {
     syncPromise = fetchLagosNetworkTime()
       .then((networkTime) => {
-        clockOffsetMs = networkTime.getTime() - Date.now();
+        const drift = networkTime.getTime() - Date.now();
+        // A cached or malformed time provider must not move the workday to a
+        // different calendar date. Hosted servers already maintain a synced clock.
+        clockOffsetMs = Number.isFinite(drift) && Math.abs(drift) <= MAX_CLOCK_DRIFT_MS ? drift : 0;
         lastSyncAt = Date.now();
         return new Date(Date.now() + clockOffsetMs);
       })
