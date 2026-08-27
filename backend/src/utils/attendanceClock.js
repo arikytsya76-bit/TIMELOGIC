@@ -61,8 +61,14 @@ function weekdayKey(value = new Date(), timeZone = 'Africa/Lagos') {
 function officeHoursFor(value, office = {}) {
   const key = weekdayKey(value, office.timezone);
   const schedule = office.weeklySchedule;
-  if (schedule && typeof schedule === 'object' && Object.prototype.hasOwnProperty.call(schedule, key)) {
-    const day = schedule[key];
+  if (schedule && typeof schedule === 'object' && !Array.isArray(schedule)) {
+    const scheduleKey = Object.keys(schedule).find((candidate) => candidate.toLowerCase() === key);
+    if (scheduleKey === undefined) {
+      return office.openTime && office.closeTime
+        ? { openTime: office.openTime, closeTime: office.closeTime }
+        : null;
+    }
+    const day = schedule[scheduleKey];
     if (!day || !day.openTime || !day.closeTime) return null;
     return { openTime: day.openTime, closeTime: day.closeTime };
   }

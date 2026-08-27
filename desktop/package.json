@@ -1,6 +1,6 @@
 {
   "name": "attendance-desktop",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "TimeLogic — Admin Desktop App",
   "author": "TimeLogic <support@timelogic.app>",
   "homepage": "https://timelogic.pages.dev",
@@ -35,7 +35,8 @@
     "nsis": {
       "shortcutName": "TimeLogic Admin",
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
     },
     "publish": [{
       "provider": "github",

@@ -216,9 +216,10 @@ class AttendanceService {
     });
     if (!session?.office) return;
     const timezone = session.office.timezone || 'Africa/Lagos';
+    const hours = officeHoursFor(session.startTime, session.office);
     const workPolicy = {
-      openTime: session.office.openTime,
-      closeTime: session.office.closeTime,
+      openTime: hours?.openTime || session.office.openTime,
+      closeTime: hours?.closeTime || session.office.closeTime,
       timezone,
     };
     const recordDate = attendanceDate(session.startTime, {
@@ -843,7 +844,8 @@ class AttendanceService {
   //  > lateAfterMinutes after open  → COMPLETELY_LATE, latePenalty (₦ off salary)
   _computeStatusAndPenalty(clockInTime, session) {
     const o = session.office ?? {};
-    if (!o.openTime) {
+    const hours = officeHoursFor(clockInTime, o);
+    if (!hours?.openTime) {
       const minutes = (clockInTime.getTime() - session.startTime.getTime()) / 60000;
       if (minutes <= (o.graceMinutes ?? 30)) return { status: 'PRESENT', penalty: 0, minutesLate: Math.max(0, Math.floor(minutes)) };
       if (minutes <= (o.lateAfterMinutes ?? 90)) return { status: 'PRESENT', penalty: o.gracePenalty ?? 0, minutesLate: Math.floor(minutes) };
@@ -851,7 +853,12 @@ class AttendanceService {
     }
     const configuredLateAfter = Number(o.lateAfterMinutes);
     const lateAfterMinutes = configuredLateAfter > 0 ? configuredLateAfter : Number(env.CHECKIN_WINDOW_MIN) || 40;
-    const result = evaluateAttendance(clockInTime, { ...o, lateAfterMinutes, openingReference: session.startTime });
+    const result = evaluateAttendance(clockInTime, {
+      ...o,
+      ...hours,
+      lateAfterMinutes,
+      openingReference: session.startTime,
+    });
     return result.status === 'LATE' ? { ...result, status: 'COMPLETELY_LATE', penalty: o.completelyLatePenalty ?? o.latePenalty ?? 0 } : result;
   }
 

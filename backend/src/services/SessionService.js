@@ -37,7 +37,7 @@ class SessionService {
     let openAt = null;
     let closeAt = null;
 
-    // Sessions may only be created during the office's live work window.
+    // Allow an admin to create the session during the configured pre-open lead.
     if (openMin != null) {
       const local = zonedParts(now, office.timezone);
       const localMin = local.hour * 60 + local.minute;
@@ -47,9 +47,10 @@ class SessionService {
         if (localMin < closeMin) openAt = atZonedTime(now, hours.openTime, office.timezone, -1);
         else closeAt = atZonedTime(now, hours.closeTime, office.timezone, 1);
       }
-      if (now < openAt) {
+      const createAt = new Date(openAt.getTime() - (Number(env.AUTO_SESSION_LEAD_MIN) || 40) * 60_000);
+      if (now < createAt) {
         throw Object.assign(
-          new Error(`Too early. Sessions can be created at the ${hours.openTime} opening time (${office.timezone}).`),
+          new Error(`Too early. Sessions can be created from ${hours.openTime} (${office.timezone}), up to ${Number(env.AUTO_SESSION_LEAD_MIN) || 40} minutes before opening.`),
           { status: 400 }
         );
       }
