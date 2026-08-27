@@ -418,7 +418,17 @@ const employeeSummary = async (req, res, next) => {
       prisma.breakRecord.aggregate({ where: { employeeId: employee.id }, _sum: { penalty: true } }),
       prisma.attendanceRecord.count({ where: { employeeId: employee.id } }),
     ]);
-    res.json({ success: true, data: { totalPenalty: (penalties._sum.penalty ?? 0) + (breakPenalties._sum.penalty ?? 0), attendanceCount } });
+    const attendancePenalty = penalties._sum.penalty ?? 0;
+    const breakPenalty = breakPenalties._sum.penalty ?? 0;
+    res.json({
+      success: true,
+      data: {
+        attendancePenalty,
+        breakPenalty,
+        totalPenalty: attendancePenalty + breakPenalty,
+        attendanceCount,
+      },
+    });
   } catch (err) { next(err); }
 };
 

@@ -209,7 +209,7 @@ function EditCheckInMethodModal({
 
 function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any; onClose: () => void; onRefresh: () => void }) {
   const [emp, setEmp] = useState(initialEmp);
-  const [summary, setSummary] = useState<{ totalPenalty: number; attendanceCount: number } | null>(null);
+  const [summary, setSummary] = useState<{ totalPenalty: number; attendancePenalty?: number; breakPenalty?: number; attendanceCount: number } | null>(null);
   const [uploading, setUploading] = useState(false);
   const [imgError, setImgError] = useState(false);
   // Stable cache-bust version — only increments when a new photo is uploaded
@@ -267,6 +267,8 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     { label: 'Last Login',         value: emp.lastLoginAt ? new Date(emp.lastLoginAt).toLocaleString() : 'Never' },
     { label: 'Joined',             value: new Date(emp.createdAt).toLocaleDateString('en-GB') },
     { label: 'Registered Devices', value: String(emp._count?.devices ?? 0) },
+    { label: 'Attendance Penalty', value: summary ? `₦${(summary.attendancePenalty ?? 0).toLocaleString()}` : 'Loading...' },
+    { label: 'Break Penalty', value: summary ? `₦${(summary.breakPenalty ?? 0).toLocaleString()}` : 'Loading...' },
     { label: 'Total Penalty', value: summary ? `₦${summary.totalPenalty.toLocaleString()}` : 'Loading...' },
   ];
 
