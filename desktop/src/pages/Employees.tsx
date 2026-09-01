@@ -263,6 +263,10 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     setUploading(true);
     try {
       const faceSignature = await buildFaceSignature(file);
+      if (!faceSignature.length) {
+        throw new Error('This image could not be processed into a valid face signature. Please try another photo.');
+      }
+
       const fd = new FormData();
       fd.append('photo', file);  // field name must match upload.single('photo')
       fd.append('faceSignature', JSON.stringify(faceSignature));

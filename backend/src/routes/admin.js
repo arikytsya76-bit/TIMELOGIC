@@ -9,6 +9,41 @@ const { prisma } = require('../config/database');
 const { stationLimiter } = require('../middleware/rateLimiter');
 const studentRoutes = require('./students');
 
+function normalizeFaceSignature(raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+
+  const parseArray = (value) => {
+    if (!Array.isArray(value)) return null;
+    const normalized = value.map((entry) => Number(entry));
+    return normalized.every((entry) => Number.isFinite(entry)) ? normalized : null;
+  };
+
+  if (Array.isArray(raw)) return parseArray(raw);
+
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parseArray(parsed);
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.values)) {
+        return parseArray(parsed.values);
+      }
+    } catch (_) {
+      // fall through and treat as invalid if it is not valid JSON
+    }
+    return null;
+  }
+
+  if (raw && typeof raw === 'object' && Array.isArray(raw.values)) {
+    return parseArray(raw.values);
+  }
+
+  return null;
+}
+
+module.exports.normalizeFaceSignature = normalizeFaceSignature;
+
 // Secure employee station. The admin session must already be authenticated;
 // the employee then confirms their own password for each manual action.
 router.get('/manual-attendance', authenticate, isAdmin, ctrl.getManualAttendance);
@@ -96,23 +131,20 @@ router.post('/users/:userId/face',
       }
       const url = `/uploads/faces/${req.file.filename}`;
       const rawSignature = req.body?.faceSignature;
-      let faceEncodingData = undefined;
-      if (rawSignature) {
-        try {
-          const parsed = typeof rawSignature === 'string' ? JSON.parse(rawSignature) : rawSignature;
-          if (Array.isArray(parsed)) {
-            faceEncodingData = Buffer.from(JSON.stringify(parsed));
-          }
-        } catch (_) {
-          return res.status(400).json({ success: false, message: 'Invalid face signature data.' });
-        }
+      const normalizedSignature = normalizeFaceSignature(rawSignature);
+
+      if (!normalizedSignature || normalizedSignature.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'This photo could not be registered because no valid face signature was generated. Please retry with a cleaner image.',
+        });
       }
 
       const user = await prisma.user.update({
         where: { id: req.params.userId },
         data: {
           profileImageUrl: url,
-          ...(faceEncodingData ? { faceEncodingData } : {}),
+          faceEncodingData: Buffer.from(JSON.stringify(normalizedSignature)),
         },
         select: { id: true, firstName: true, lastName: true, profileImageUrl: true },
       });
