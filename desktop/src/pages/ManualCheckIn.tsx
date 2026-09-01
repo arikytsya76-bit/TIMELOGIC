@@ -57,6 +57,108 @@ function resultRecord(result: ManualAttendanceResult) {
   return result.record ?? result.attendance;
 }
 
+async function loadImageFromDataUrl(dataUrl: string): Promise<HTMLImageElement> {
+  return await new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not load the camera photo.'));
+    image.src = dataUrl;
+  });
+}
+
+async function buildFaceSignatureFromDataUrl(dataUrl: string): Promise<number[]> {
+  const image = await loadImageFromDataUrl(dataUrl);
+  const canvas = document.createElement('canvas');
+  canvas.width = 32;
+  canvas.height = 32;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Camera capture could not be processed.');
+  context.drawImage(image, 0, 0, 32, 32);
+  const pixels = context.getImageData(0, 0, 32, 32).data;
+  const values: number[] = [];
+
+  for (let i = 0; i < pixels.length; i += 4) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+    values.push(Number(brightness.toFixed(4)));
+  }
+
+  return values;
+}
+
+async function openCameraCapture(): Promise<number[]> {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    throw new Error('This desktop app does not have camera access enabled.');
+  }
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+    audio: false,
+  });
+
+  const video = document.createElement('video');
+  video.srcObject = stream;
+  video.playsInline = true;
+  video.muted = true;
+  await video.play();
+
+  const overlay = document.createElement('div');
+  overlay.innerHTML = `
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,0.82); display:flex; align-items:center; justify-content:center; z-index:999999; font-family:Arial,sans-serif;">
+      <div style="background:#111827; border:1px solid rgba(255,255,255,0.1); border-radius:22px; padding:24px; width:min(90vw, 520px); text-align:center; color:#fff; box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+        <div style="font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#cbd5e1; margin-bottom:12px;">Verify identity</div>
+        <div id="countdown" style="font-size:54px; font-weight:700; line-height:1; margin:14px 0 18px; color:#f8fafc;">5</div>
+        <video id="camera-video" autoplay playsinline muted style="width:100%; max-width:420px; border-radius:16px; background:#000; border:1px solid rgba(255,255,255,0.08); display:block; margin:0 auto 18px;"></video>
+        <button id="cancel-btn" style="border:1px solid rgba(255,255,255,0.18); background:transparent; color:#fff; border-radius:10px; padding:10px 18px; font-weight:600; cursor:pointer;">Cancel</button>
+      </div>
+    </div>
+  `;
+
+  const cancelButton = overlay.querySelector('#cancel-btn') as HTMLButtonElement;
+  const countdownEl = overlay.querySelector('#countdown') as HTMLElement;
+  const cameraVideo = overlay.querySelector('#camera-video') as HTMLVideoElement;
+  cameraVideo.srcObject = stream;
+
+  const cleanup = () => {
+    stream.getTracks().forEach((track) => track.stop());
+    overlay.remove();
+  };
+
+  let cancelled = false;
+  cancelButton.addEventListener('click', () => {
+    cancelled = true;
+    cleanup();
+  }, { once: true });
+
+  document.body.appendChild(overlay);
+
+  if (cancelled) {
+    throw new Error('Camera verification was cancelled.');
+  }
+
+  try {
+    for (let seconds = 5; seconds >= 1; seconds -= 1) {
+      countdownEl.textContent = String(seconds);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 480;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Your browser could not process the camera photo.');
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    cleanup();
+    return await buildFaceSignatureFromDataUrl(dataUrl);
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
 export default function ManualCheckIn() {
   const { organization } = useAuth();
   const [dashboard, setDashboard] = useState<Awaited<ReturnType<typeof fetchManualAttendance>> | null>(null);
@@ -126,8 +228,9 @@ export default function ManualCheckIn() {
     setConfirmError('');
     try {
       const body = { employeeId: pending.employee.id, sessionId: activeSessionId, password };
+      const faceSignature = pending.kind === 'check-in' ? await openCameraCapture() : undefined;
       const response = pending.kind === 'check-in'
-        ? await manualEmployeeCheckIn(body)
+        ? await manualEmployeeCheckIn({ ...body, faceSignature })
         : await manualEmployeeCheckOut({
             employeeId: pending.employee.id,
             sessionId: pending.employee.attendance?.sessionId || undefined,

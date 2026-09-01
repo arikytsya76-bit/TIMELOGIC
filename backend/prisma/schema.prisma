@@ -225,10 +225,13 @@ model User {
   employeeCode     String?
   passwordHash     String
   role             UserRole              @default(EMPLOYEE)
-  profileImageUrl  String?
-  faceEncodingData Bytes?
-  status           UserStatus            @default(ACTIVE)
-  shiftType        ShiftType             @default(FLEXIBLE)
+  profileImageUrl    String?
+  faceEncodingData   Bytes?
+  faceBlockedUntil   DateTime?
+  faceMismatchCount  Int                   @default(0)
+  faceLastMismatchAt DateTime?
+  status             UserStatus            @default(ACTIVE)
+  shiftType          ShiftType             @default(FLEXIBLE)
   checkInMethod    EmployeeCheckInMethod @default(PHONE)
   phone            String?
   adminLevel       Int?

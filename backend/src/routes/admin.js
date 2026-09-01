@@ -95,9 +95,25 @@ router.post('/users/:userId/face',
         return res.status(400).json({ success: false, message: 'No photo received. Make sure the field name is "photo".' });
       }
       const url = `/uploads/faces/${req.file.filename}`;
+      const rawSignature = req.body?.faceSignature;
+      let faceEncodingData = undefined;
+      if (rawSignature) {
+        try {
+          const parsed = typeof rawSignature === 'string' ? JSON.parse(rawSignature) : rawSignature;
+          if (Array.isArray(parsed)) {
+            faceEncodingData = Buffer.from(JSON.stringify(parsed));
+          }
+        } catch (_) {
+          return res.status(400).json({ success: false, message: 'Invalid face signature data.' });
+        }
+      }
+
       const user = await prisma.user.update({
         where: { id: req.params.userId },
-        data: { profileImageUrl: url },
+        data: {
+          profileImageUrl: url,
+          ...(faceEncodingData ? { faceEncodingData } : {}),
+        },
         select: { id: true, firstName: true, lastName: true, profileImageUrl: true },
       });
       res.json({ success: true, data: user });

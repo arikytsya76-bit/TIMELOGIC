@@ -222,14 +222,50 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     fetchEmployeeSummary(initialEmp.id).then(setSummary).catch(() => setSummary({ totalPenalty: 0, attendanceCount: 0 }));
   }, [initialEmp]);
 
+  const buildFaceSignature = async (file: File): Promise<number[]> => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result ?? ''));
+      reader.onerror = () => reject(new Error('Could not read the selected face photo.'));
+      reader.readAsDataURL(file);
+    });
+
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Could not process the selected face photo.'));
+      img.src = dataUrl;
+    });
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 32;
+    canvas.height = 32;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('This browser cannot generate a face signature.');
+    context.drawImage(image, 0, 0, 32, 32);
+    const pixels = context.getImageData(0, 0, 32, 32).data;
+    const array: number[] = [];
+
+    for (let i = 0; i < pixels.length; i += 4) {
+      const r = pixels[i];
+      const g = pixels[i + 1];
+      const b = pixels[i + 2];
+      array.push(Number(((r * 0.299 + g * 0.587 + b * 0.114) / 255).toFixed(4)));
+    }
+
+    return array;
+  };
+
   const uploadFace = async (file: File) => {
     const token = getToken();
     if (!token) { alert('Session expired. Please log in again.'); return; }
 
     setUploading(true);
     try {
+      const faceSignature = await buildFaceSignature(file);
       const fd = new FormData();
       fd.append('photo', file);  // field name must match upload.single('photo')
+      fd.append('faceSignature', JSON.stringify(faceSignature));
 
       const res = await authenticatedFetch(`${API_URL}/admin/users/${emp.id}/face`, {
         method: 'POST',
@@ -332,10 +368,69 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
         <div className="px-6 pb-6 flex gap-3">
           {/* Only show upload button if no face photo is registered yet */}
           {!emp.profileImageUrl && (
-            <button onClick={() => fileRef.current?.click()}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary-50 dark:bg-primary-900/20 text-primary-700 text-sm font-semibold rounded-xl hover:bg-primary-100 transition">
-              <Camera size={15} />Upload Face Photo
-            </button>
+            <div className="flex gap-3 flex-1">
+              <button onClick={() => fileRef.current?.click()}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary-50 dark:bg-primary-900/20 text-primary-700 text-sm font-semibold rounded-xl hover:bg-primary-100 transition">
+                <Camera size={15} />Upload Face Photo
+              </button>
+              <button onClick={async () => {
+                try {
+                  const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+                  const video = document.createElement('video');
+                  video.srcObject = stream;
+                  video.playsInline = true;
+                  video.muted = true;
+                  await video.play();
+
+                  const overlay = document.createElement('div');
+                  overlay.innerHTML = `
+                    <div style="position:fixed; inset:0; background:rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index:999999; font-family:Arial,sans-serif;">
+                      <div style="background:#111827; border-radius:18px; padding:18px; text-align:center; color:#fff; width:min(90vw, 460px);">
+                        <div style="font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#cbd5e1; margin-bottom:10px;">Capture face</div>
+                        <div id="camera-countdown" style="font-size:42px; font-weight:700; margin-bottom:12px;">5</div>
+                        <video id="camera-video" autoplay playsinline muted style="width:100%; max-width:360px; border-radius:12px; display:block; margin:0 auto 12px; background:#000;"></video>
+                        <button id="camera-cancel" style="border:1px solid rgba(255,255,255,0.15); background:transparent; color:#fff; border-radius:10px; padding:8px 14px; cursor:pointer;">Cancel</button>
+                      </div>
+                    </div>
+                  `;
+                  document.body.appendChild(overlay);
+
+                  const countdown = overlay.querySelector('#camera-countdown') as HTMLElement;
+                  const cameraVideo = overlay.querySelector('#camera-video') as HTMLVideoElement;
+                  const cancelButton = overlay.querySelector('#camera-cancel') as HTMLButtonElement;
+                  cameraVideo.srcObject = stream;
+
+                  const cleanup = () => { stream.getTracks().forEach((track) => track.stop()); overlay.remove(); };
+                  let cancelled = false;
+                  cancelButton.addEventListener('click', () => { cancelled = true; cleanup(); }, { once: true });
+
+                  if (cancelled) {
+                    throw new Error('Camera capture was cancelled.');
+                  }
+
+                  for (let sec = 5; sec >= 1; sec -= 1) {
+                    if (cancelled) throw new Error('Camera capture was cancelled.');
+                    countdown.textContent = String(sec);
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                  }
+
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 640;
+                  canvas.height = 480;
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) throw new Error('The browser could not process the face photo.');
+                  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                  const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                  cleanup();
+                  const blob = await fetch(dataUrl).then((res) => res.blob());
+                  await uploadFace(new File([blob], `${emp.id}-face.jpg`, { type: 'image/jpeg' }));
+                } catch (err) {
+                  alert(err instanceof Error ? err.message : 'Camera capture failed.');
+                }
+              }} className="flex items-center justify-center gap-2 py-2.5 bg-slate-800 text-white text-sm font-semibold rounded-xl hover:bg-slate-900 transition">
+                <Camera size={15} />Use Camera
+              </button>
+            </div>
           )}
           <button onClick={onClose}
             className={`${!emp.profileImageUrl ? 'flex-1' : 'w-full'} py-2.5 border border-[var(--border)] text-[var(--text-main)] text-sm font-semibold rounded-xl hover:bg-[var(--hover-bg)] transition`}>

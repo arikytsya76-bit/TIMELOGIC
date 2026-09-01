@@ -67,7 +67,7 @@ export const fetchManualAttendance = (params: { sessionId?: string; search?: str
     return { ...dashboard, employees: [...dashboard.employees, ...rest.flat()] };
   });
 };
-export const manualEmployeeCheckIn = (body: { employeeId: string; sessionId: string; password: string }) =>
+export const manualEmployeeCheckIn = (body: { employeeId: string; sessionId: string; password: string; faceSignature?: number[] }) =>
   api.post<ApiEnvelope<ManualAttendanceResult>>('/admin/manual-attendance/check-in', body).then((r) => r.data);
 export const manualEmployeeCheckOut = (body: { employeeId: string; sessionId?: string; password: string }) =>
   api.post<ApiEnvelope<ManualAttendanceResult>>('/admin/manual-attendance/check-out', body).then((r) => r.data);
