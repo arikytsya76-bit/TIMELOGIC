@@ -538,6 +538,7 @@ class AttendanceService {
         select: {
           id: true, firstName: true, lastName: true, employeeCode: true,
           email: true, checkInMethod: true, phone: true,
+          profileImageUrl: true,
           department: { select: { name: true } },
           attendanceRecords: selectedSession ? {
             where: { sessionId: selectedSession.id, date: recordDate },

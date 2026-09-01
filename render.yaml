@@ -8,3 +8,9 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+      - key: UPLOAD_DIR
+        value: /data/uploads
+    disk:
+      name: timelogic-uploads
+      mountPath: /data
+      sizeGB: 1
