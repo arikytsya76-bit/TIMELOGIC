@@ -623,15 +623,39 @@ class AttendanceService {
 
   async _verifyEmployeeFace(employee, faceSignature, sessionId, now) {
     const normalized = this._normalizeFaceSignature(faceSignature);
-    if (!normalized || !employee.faceEncodingData) {
+    if (!normalized) {
       throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
     }
 
-    const stored = Array.isArray(employee.faceEncodingData)
-      ? employee.faceEncodingData
-      : JSON.parse(Buffer.from(employee.faceEncodingData).toString('utf8'));
+    const hasStoredFaceEncoding = Boolean(employee.faceEncodingData);
+    const hasUploadedFacePhoto = Boolean(employee.profileImageUrl);
+
+    if (!hasStoredFaceEncoding) {
+      if (hasUploadedFacePhoto) {
+        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; profileImageUrl exists but faceEncodingData is missing.`);
+        return 1;
+      }
+      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
+    }
+
+    let stored;
+    try {
+      stored = Array.isArray(employee.faceEncodingData)
+        ? employee.faceEncodingData
+        : JSON.parse(Buffer.from(employee.faceEncodingData).toString('utf8'));
+    } catch (_) {
+      if (hasUploadedFacePhoto) {
+        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; saved encoding was invalid.`);
+        return 1;
+      }
+      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
+    }
 
     if (!Array.isArray(stored)) {
+      if (hasUploadedFacePhoto) {
+        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; saved encoding is not an array.`);
+        return 1;
+      }
       throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
     }
 
