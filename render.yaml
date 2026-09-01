@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: timelogic-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm run deploy
+    envVars:
+      - key: NODE_ENV
+        value: production
