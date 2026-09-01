@@ -7,7 +7,512 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Enumerations ─────────────────────────────────────────────────────────────
+model Organization {
+  id                 String            @id @default(uuid())
+  name               String
+  industry           String?
+  subscriptionTier   String            @default("basic")
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  leavePolicy        Json?
+  allowDeviceCheckIn Boolean           @default(true)
+  allowManualCheckIn Boolean           @default(false)
+  hasStudents        Boolean           @default(false)
+  openingTime        String            @default("08:00")
+  timezone           String            @default("Africa/Lagos")
+  adminLoginEvents   AdminLoginEvent[]
+  departments        Department[]
+  offices            Office[]
+  students           Student[]
+  users              User[]
+
+  @@map("organizations")
+}
+
+model Office {
+  id                    String              @id @default(uuid())
+  orgId                 String
+  name                  String
+  address               String?
+  timezone              String              @default("Africa/Lagos")
+  isActive              Boolean             @default(true)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  wifiSSID              String?
+  breakMinutes          Int                 @default(60)
+  closeTime             String              @default("17:00")
+  openTime              String              @default("08:00")
+  autoSessionMinutes    Int                 @default(60)
+  breakEnd              String?
+  breakStart            String?
+  graceMinutes          Int                 @default(30)
+  gracePenalty          Int                 @default(0)
+  lateAfterMinutes      Int                 @default(90)
+  latePenalty           Int                 @default(0)
+  publicIp              String?
+  weeklySchedule        Json?
+  completelyLatePenalty Int                 @default(0)
+  sessions              AttendanceSession[]
+  organization          Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  securitySettings      SecuritySettings?
+  wifiFingerprints      WiFiFingerprint[]
+
+  @@map("offices")
+}
+
+model Department {
+  id           String       @id @default(uuid())
+  orgId        String
+  name         String
+  managerId    String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  breakPolicy  BreakPolicy?
+  manager      User?        @relation("DepartmentManager", fields: [managerId], references: [id])
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  employees    User[]       @relation("DepartmentEmployees")
+
+  @@map("departments")
+}
+
+model User {
+  id                 String                @id @default(uuid())
+  orgId              String
+  departmentId       String?
+  firstName          String
+  lastName           String
+  email              String                @unique
+  passwordHash       String
+  role               UserRole              @default(EMPLOYEE)
+  profileImageUrl    String?
+  faceEncodingData   Bytes?
+  status             UserStatus            @default(ACTIVE)
+  shiftType          ShiftType             @default(FLEXIBLE)
+  adminLevel         Int?
+  lastLoginAt        DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  employeeCode       String?
+  checkInMethod      EmployeeCheckInMethod @default(PHONE)
+  phone              String?
+  faceBlockedUntil   DateTime?
+  faceMismatchCount  Int                   @default(0)
+  faceLastMismatchAt DateTime?
+  adminLoginEvents   AdminLoginEvent[]
+  adminPermissions   AdminPermission[]
+  manualCheckIns     AttendanceRecord[]    @relation("ManualCheckInRecorder")
+  manualCheckOuts    AttendanceRecord[]    @relation("ManualCheckOutRecorder")
+  attendanceRecords  AttendanceRecord[]
+  reviewedRecords    AttendanceRecord[]    @relation("RecordReviewer")
+  generatedReports   AttendanceReport[]
+  createdSessions    AttendanceSession[]   @relation("SessionCreator")
+  breakRecords       BreakRecord[]
+  managedDepts       Department[]          @relation("DepartmentManager")
+  emergencyControls  EmergencyControl[]
+  fraudAlerts        FraudAlert[]          @relation("FraudAlertEmployee")
+  resolvedAlerts     FraudAlert[]          @relation("FraudAlertResolver")
+  leaveBalances      LeaveBalance[]
+  approvedLeaves     LeaveRequest[]        @relation("LeaveApprover")
+  leaveRequests      LeaveRequest[]
+  refreshTokens      RefreshToken[]
+  devices            RegisteredDevice[]
+  scanAttempts       ScanAttempt[]
+  updatedSecSettings SecuritySettings[]    @relation("SettingsUpdater")
+  studentCheckIns    StudentAttendance[]   @relation("StudentCheckInRecorder")
+  studentCheckOuts   StudentAttendance[]   @relation("StudentCheckOutRecorder")
+  department         Department?           @relation("DepartmentEmployees", fields: [departmentId], references: [id])
+  organization       Organization          @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, employeeCode])
+  @@map("users")
+}
+
+model AdminPermission {
+  id         String @id @default(uuid())
+  userId     String
+  permission String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+  @@map("admin_permissions")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model AdminLoginEvent {
+  id               String           @id @default(uuid())
+  adminId          String
+  orgId            String
+  loggedInAt       DateTime         @default(now())
+  attendanceStatus AttendanceStatus
+  minutesLate      Int              @default(0)
+  penalty          Int              @default(0)
+  ipAddress        String?
+  userAgent        String?
+  admin            User             @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  organization     Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, loggedInAt])
+  @@index([orgId, loggedInAt])
+  @@map("admin_login_events")
+}
+
+model Student {
+  id                String              @id @default(uuid())
+  orgId             String
+  firstName         String
+  lastName          String
+  studentCode       String
+  className         String?
+  status            StudentStatus       @default(ACTIVE)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  attendanceRecords StudentAttendance[]
+  organization      Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, studentCode])
+  @@index([orgId, status])
+  @@map("students")
+}
+
+model StudentAttendance {
+  id             String    @id @default(uuid())
+  studentId      String
+  date           DateTime  @db.Date
+  checkInTime    DateTime
+  checkOutTime   DateTime?
+  checkedInById  String?
+  checkedOutById String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  checkedInBy    User?     @relation("StudentCheckInRecorder", fields: [checkedInById], references: [id])
+  checkedOutBy   User?     @relation("StudentCheckOutRecorder", fields: [checkedOutById], references: [id])
+  student        Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, date])
+  @@index([date])
+  @@map("student_attendance")
+}
+
+model RegisteredDevice {
+  id                String    @id @default(uuid())
+  employeeId        String
+  deviceFingerprint String
+  platform          String
+  model             String?
+  osVersion         String?
+  appVersion        String?
+  isActive          Boolean   @default(true)
+  registeredAt      DateTime  @default(now())
+  lastUsedAt        DateTime?
+  employee          User      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("registered_devices")
+}
+
+model WiFiFingerprint {
+  id                String   @id @default(uuid())
+  officeId          String
+  ssid              String
+  bssid             String
+  signalStrengthMin Int      @default(-80)
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  office            Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+
+  @@map("wifi_fingerprints")
+}
+
+model SecuritySettings {
+  id                    String   @id @default(uuid())
+  officeId              String   @unique
+  wifiRequired          Boolean  @default(true)
+  deviceBindingEnabled  Boolean  @default(true)
+  screenshotProtection  Boolean  @default(true)
+  qrRotationSeconds     Int      @default(30)
+  maxDevicesPerEmployee Int      @default(2)
+  lateThresholdMinutes  Int      @default(15)
+  maxFailedAttempts     Int      @default(5)
+  autoLockOnFraud       Boolean  @default(true)
+  updatedAt             DateTime @updatedAt
+  updatedBy             String?
+  office                Office   @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  updater               User?    @relation("SettingsUpdater", fields: [updatedBy], references: [id])
+
+  @@map("security_settings")
+}
+
+model BreakPolicy {
+  id                   String      @id @default(uuid())
+  departmentId         String      @unique
+  policyName           String
+  maxLunchMinutes      Int         @default(60)
+  maxShortBreaks       Int         @default(2)
+  maxShortBreakMinutes Int         @default(15)
+  totalDailyBreakLimit Int         @default(90)
+  autoEndAfterMinutes  Int         @default(120)
+  requiresApproval     Boolean     @default(false)
+  appliesTo            ShiftType[]
+  breakEnd             String?
+  breakStart           String?
+  overstayPenalty      Int         @default(100)
+  department           Department  @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+
+  @@map("break_policies")
+}
+
+model AttendanceSession {
+  id                String                    @id @default(uuid())
+  sessionName       String
+  officeId          String?
+  createdBy         String?
+  startTime         DateTime
+  endTime           DateTime?
+  qrRefreshInterval Int                       @default(30)
+  status            SessionStatus             @default(SCHEDULED)
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  officeName        String?
+  orgName           String?
+  attendanceRecords AttendanceRecord[]
+  creator           User?                     @relation("SessionCreator", fields: [createdBy], references: [id])
+  office            Office?                   @relation(fields: [officeId], references: [id])
+  emergencyControls EmergencyControlSession[]
+  fraudAlerts       FraudAlert[]
+  qrTokens          QRToken[]
+  scanAttempts      ScanAttempt[]
+
+  @@map("attendance_sessions")
+}
+
+model QRToken {
+  id          String            @id @default(uuid())
+  tokenValue  String            @unique
+  sessionId   String
+  generatedAt DateTime          @default(now())
+  expiresAt   DateTime
+  deviceScope String?
+  isConsumed  Boolean           @default(false)
+  consumedBy  String?
+  consumedAt  DateTime?
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("qr_tokens")
+}
+
+model AttendanceRecord {
+  id                   String            @id @default(uuid())
+  employeeId           String
+  sessionId            String
+  date                 DateTime          @db.Date
+  clockInTime          DateTime?
+  clockOutTime         DateTime?
+  status               AttendanceStatus  @default(ABSENT)
+  totalWorkHours       Float?
+  totalBreakMinutes    Int               @default(0)
+  scanResult           ScanResult?
+  wifiVerified         Boolean           @default(false)
+  deviceVerified       Boolean           @default(false)
+  flagged              Boolean           @default(false)
+  flagReason           String?
+  reviewedBy           String?
+  reviewNotes          String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  deviceId             String?
+  penalty              Int               @default(0)
+  wifiSSID             String?
+  checkInSource        AttendanceSource  @default(PHONE)
+  checkOutSource       AttendanceSource?
+  checkInRecordedById  String?
+  checkOutRecordedById String?
+  checkInRecorder      User?             @relation("ManualCheckInRecorder", fields: [checkInRecordedById], references: [id])
+  checkOutRecorder     User?             @relation("ManualCheckOutRecorder", fields: [checkOutRecordedById], references: [id])
+  employee             User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewer             User?             @relation("RecordReviewer", fields: [reviewedBy], references: [id])
+  session              AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  breakRecords         BreakRecord[]
+
+  @@unique([employeeId, sessionId, date])
+  @@map("attendance_records")
+}
+
+model ScanAttempt {
+  id          String            @id @default(uuid())
+  employeeId  String
+  sessionId   String
+  tokenUsed   String
+  timestamp   DateTime          @default(now())
+  result      ScanResult
+  deviceId    String?
+  wifiSSID    String?
+  wifiBSSID   String?
+  ipAddress   String?
+  geoLat      Float?
+  geoLng      Float?
+  fraudAlerts FraudAlert[]
+  employee    User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("scan_attempts")
+}
+
+model BreakRecord {
+  id                 String           @id @default(uuid())
+  attendanceRecordId String
+  employeeId         String
+  breakType          BreakType
+  startTime          DateTime
+  endTime            DateTime?
+  durationMinutes    Int?
+  isAutoEnded        Boolean          @default(false)
+  notes              String?
+  penalty            Int              @default(0)
+  startedByAdmin     Boolean          @default(false)
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  employee           User             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("break_records")
+}
+
+model LeaveRequest {
+  id              String      @id @default(uuid())
+  employeeId      String
+  leaveType       LeaveType
+  startDate       DateTime    @db.Date
+  endDate         DateTime    @db.Date
+  totalDays       Float
+  reason          String?
+  attachmentUrls  String[]
+  status          LeaveStatus @default(PENDING)
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  approver        User?       @relation("LeaveApprover", fields: [approvedBy], references: [id])
+  employee        User        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@map("leave_requests")
+}
+
+model LeaveBalance {
+  id             String    @id @default(uuid())
+  employeeId     String
+  leaveType      LeaveType
+  year           Int
+  totalEntitled  Float     @default(0)
+  used           Float     @default(0)
+  pending        Float     @default(0)
+  remaining      Float     @default(0)
+  carriedForward Float     @default(0)
+  employee       User      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, leaveType, year])
+  @@map("leave_balances")
+}
+
+model FraudAlert {
+  id            String            @id @default(uuid())
+  employeeId    String
+  sessionId     String
+  scanAttemptId String?
+  fraudType     FraudType
+  severity      AlertSeverity     @default(MEDIUM)
+  description   String
+  evidence      Json?
+  status        AlertStatus       @default(NEW)
+  resolvedBy    String?
+  resolution    String?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  employee      User              @relation("FraudAlertEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  resolver      User?             @relation("FraudAlertResolver", fields: [resolvedBy], references: [id])
+  scanAttempt   ScanAttempt?      @relation(fields: [scanAttemptId], references: [id])
+  session       AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("fraud_alerts")
+}
+
+model ScreenshotLog {
+  id         String   @id @default(uuid())
+  employeeId String
+  deviceId   String?
+  platform   String
+  timestamp  DateTime @default(now())
+  sessionId  String?
+
+  @@map("screenshot_logs")
+}
+
+model EmergencyControl {
+  id          String                    @id @default(uuid())
+  triggeredBy String
+  action      EmergencyAction
+  reason      String
+  timestamp   DateTime                  @default(now())
+  isReverted  Boolean                   @default(false)
+  revertedAt  DateTime?
+  revertedBy  String?
+  sessions    EmergencyControlSession[]
+  admin       User                      @relation(fields: [triggeredBy], references: [id], onDelete: Cascade)
+
+  @@map("emergency_controls")
+}
+
+model EmergencyControlSession {
+  id                 String            @id @default(uuid())
+  emergencyControlId String
+  sessionId          String
+  emergencyControl   EmergencyControl  @relation(fields: [emergencyControlId], references: [id], onDelete: Cascade)
+  session            AttendanceSession @relation(fields: [sessionId], references: [id])
+
+  @@map("emergency_control_sessions")
+}
+
+model AttendanceReport {
+  id                  String   @id @default(uuid())
+  reportType          String
+  dateRangeStart      DateTime
+  dateRangeEnd        DateTime
+  totalPresent        Int      @default(0)
+  totalLate           Int      @default(0)
+  totalAbsent         Int      @default(0)
+  totalOnLeave        Int      @default(0)
+  totalFlagged        Int      @default(0)
+  averageWorkHours    Float?
+  averageBreakMinutes Int?
+  generatedAt         DateTime @default(now())
+  generatedBy         String
+  fileUrl             String?
+  metadata            Json?
+  generator           User     @relation(fields: [generatedBy], references: [id], onDelete: Cascade)
+
+  @@map("attendance_reports")
+}
+
+model NotificationLog {
+  id       String   @id @default(uuid())
+  userId   String
+  channel  String
+  subject  String?
+  body     String
+  status   String   @default("sent")
+  sentAt   DateTime @default(now())
+  metadata Json?
+
+  @@map("notification_logs")
+}
 
 enum UserRole {
   EMPLOYEE
@@ -25,11 +530,11 @@ enum UserStatus {
 enum AttendanceStatus {
   PRESENT
   LATE
-  COMPLETELY_LATE
   ABSENT
   HALF_DAY
   ON_LEAVE
   REVIEW_REQUIRED
+  COMPLETELY_LATE
 }
 
 enum LeaveType {
@@ -130,578 +635,4 @@ enum AttendanceSource {
 enum StudentStatus {
   ACTIVE
   INACTIVE
-}
-
-// ─── Organisation & Structure ─────────────────────────────────────────────────
-
-model Organization {
-  id                 String   @id @default(uuid())
-  name               String
-  industry           String?
-  subscriptionTier   String   @default("basic")
-  allowDeviceCheckIn Boolean  @default(true)
-  allowManualCheckIn Boolean  @default(false)
-  hasStudents        Boolean  @default(false)
-  openingTime        String   @default("08:00")
-  timezone           String   @default("Africa/Lagos")
-  // Per-organization leave entitlement, days/year per LeaveType.
-  // e.g. { "ANNUAL": 20, "SICK": 10, ... }. Set by the Super Admin.
-  leavePolicy        Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-
-  offices          Office[]
-  departments      Department[]
-  users            User[]
-  students         Student[]
-  adminLoginEvents AdminLoginEvent[]
-
-  @@map("organizations")
-}
-
-model Office {
-  id                 String  @id @default(uuid())
-  orgId              String
-  name               String
-  address            String?
-  wifiSSID           String? // approved company Wi-Fi name (native app SSID check)
-  publicIp           String? // office public IP (web/PWA "same network" check)
-  openTime           String  @default("08:00") // work day start / check-in opens (HH:MM)
-  closeTime          String  @default("17:00") // work day end / session auto-closes (HH:MM)
-  // Optional weekday schedule. Missing entries preserve legacy Mon-Sat hours;
-  // an empty entry means the office is closed for that weekday.
-  weeklySchedule     Json?
-  // ── Attendance grace + penalties (set per organization) ──
-  graceMinutes       Int     @default(30) // minutes after open with no penalty (on-time window)
-  lateAfterMinutes   Int     @default(90) // minutes after open when status becomes LATE
-  gracePenalty       Int     @default(0) // ₦ deducted: checked in after grace, before late
-  latePenalty        Int     @default(0) // ₦ deducted: checked in after the late threshold
-  completelyLatePenalty Int  @default(0) // ₦ deducted: checked in after the late threshold
-  autoSessionMinutes Int     @default(60) // duration of an auto-created session (minutes)
-  // ── Break window (employees may only break within this window) ──
-  breakStart         String? // break window start (HH:MM), null = no window
-  breakEnd           String? // break window end (HH:MM)
-  breakMinutes       Int     @default(60) // total daily break allowance (minutes)
-  timezone           String  @default("Africa/Lagos")
-  isActive           Boolean @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  organization     Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  wifiFingerprints WiFiFingerprint[]
-  sessions         AttendanceSession[]
-  securitySettings SecuritySettings?
-
-  @@map("offices")
-}
-
-model Department {
-  id        String  @id @default(uuid())
-  orgId     String
-  name      String
-  managerId String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  manager      User?        @relation("DepartmentManager", fields: [managerId], references: [id])
-  employees    User[]       @relation("DepartmentEmployees")
-  breakPolicy  BreakPolicy?
-
-  @@map("departments")
-}
-
-// ─── User / Auth ──────────────────────────────────────────────────────────────
-
-model User {
-  id               String                @id @default(uuid())
-  orgId            String
-  departmentId     String?
-  firstName        String
-  lastName         String
-  email            String                @unique
-  employeeCode     String?
-  passwordHash     String
-  role             UserRole              @default(EMPLOYEE)
-  profileImageUrl    String?
-  faceEncodingData   Bytes?
-  faceBlockedUntil   DateTime?
-  faceMismatchCount  Int                   @default(0)
-  faceLastMismatchAt DateTime?
-  status             UserStatus            @default(ACTIVE)
-  shiftType          ShiftType             @default(FLEXIBLE)
-  checkInMethod    EmployeeCheckInMethod @default(PHONE)
-  phone            String?
-  adminLevel       Int?
-  lastLoginAt      DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  department   Department?  @relation("DepartmentEmployees", fields: [departmentId], references: [id])
-  managedDepts Department[] @relation("DepartmentManager")
-
-  devices            RegisteredDevice[]
-  attendanceRecords  AttendanceRecord[]
-  leaveRequests      LeaveRequest[]
-  leaveBalances      LeaveBalance[]
-  scanAttempts       ScanAttempt[]
-  breakRecords       BreakRecord[]
-  fraudAlerts        FraudAlert[]        @relation("FraudAlertEmployee")
-  resolvedAlerts     FraudAlert[]        @relation("FraudAlertResolver")
-  createdSessions    AttendanceSession[] @relation("SessionCreator")
-  reviewedRecords    AttendanceRecord[]  @relation("RecordReviewer")
-  approvedLeaves     LeaveRequest[]      @relation("LeaveApprover")
-  emergencyControls  EmergencyControl[]
-  generatedReports   AttendanceReport[]
-  updatedSecSettings SecuritySettings[]  @relation("SettingsUpdater")
-  adminPermissions   AdminPermission[]
-  refreshTokens      RefreshToken[]
-  manualCheckIns     AttendanceRecord[]  @relation("ManualCheckInRecorder")
-  manualCheckOuts    AttendanceRecord[]  @relation("ManualCheckOutRecorder")
-  studentCheckIns    StudentAttendance[] @relation("StudentCheckInRecorder")
-  studentCheckOuts   StudentAttendance[] @relation("StudentCheckOutRecorder")
-  adminLoginEvents   AdminLoginEvent[]
-
-  @@map("users")
-  @@unique([orgId, employeeCode])
-}
-
-model AdminPermission {
-  id         String @id @default(uuid())
-  userId     String
-  permission String
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, permission])
-  @@map("admin_permissions")
-}
-
-model RefreshToken {
-  id        String   @id @default(uuid())
-  userId    String
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-  @@map("refresh_tokens")
-}
-
-model AdminLoginEvent {
-  id               String           @id @default(uuid())
-  adminId          String
-  orgId            String
-  loggedInAt       DateTime         @default(now())
-  attendanceStatus AttendanceStatus
-  minutesLate      Int              @default(0)
-  penalty          Int              @default(0)
-  ipAddress        String?
-  userAgent        String?
-
-  admin        User         @relation(fields: [adminId], references: [id], onDelete: Cascade)
-  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-
-  @@index([adminId, loggedInAt])
-  @@index([orgId, loggedInAt])
-  @@map("admin_login_events")
-}
-
-model Student {
-  id          String        @id @default(uuid())
-  orgId       String
-  firstName   String
-  lastName    String
-  studentCode String
-  className   String?
-  status      StudentStatus @default(ACTIVE)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
-  organization      Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  attendanceRecords StudentAttendance[]
-
-  @@unique([orgId, studentCode])
-  @@index([orgId, status])
-  @@map("students")
-}
-
-model StudentAttendance {
-  id             String    @id @default(uuid())
-  studentId      String
-  date           DateTime  @db.Date
-  checkInTime    DateTime
-  checkOutTime   DateTime?
-  checkedInById  String?
-  checkedOutById String?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-
-  student      Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  checkedInBy  User?   @relation("StudentCheckInRecorder", fields: [checkedInById], references: [id], onDelete: SetNull)
-  checkedOutBy User?   @relation("StudentCheckOutRecorder", fields: [checkedOutById], references: [id], onDelete: SetNull)
-
-  @@unique([studentId, date])
-  @@index([date])
-  @@map("student_attendance")
-}
-
-// ─── Device & Wi-Fi ───────────────────────────────────────────────────────────
-
-model RegisteredDevice {
-  id                String    @id @default(uuid())
-  employeeId        String
-  deviceFingerprint String
-  platform          String
-  model             String?
-  osVersion         String?
-  appVersion        String?
-  isActive          Boolean   @default(true)
-  registeredAt      DateTime  @default(now())
-  lastUsedAt        DateTime?
-
-  employee User @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@map("registered_devices")
-}
-
-model WiFiFingerprint {
-  id                String  @id @default(uuid())
-  officeId          String
-  ssid              String
-  bssid             String
-  signalStrengthMin Int     @default(-80)
-  isActive          Boolean @default(true)
-
-  createdAt DateTime @default(now())
-
-  office Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
-
-  @@map("wifi_fingerprints")
-}
-
-// ─── Security Settings ────────────────────────────────────────────────────────
-
-model SecuritySettings {
-  id                    String   @id @default(uuid())
-  officeId              String   @unique
-  wifiRequired          Boolean  @default(true)
-  deviceBindingEnabled  Boolean  @default(true)
-  screenshotProtection  Boolean  @default(true)
-  qrRotationSeconds     Int      @default(30)
-  lateThresholdMinutes  Int      @default(15)
-  maxFailedAttempts     Int      @default(5)
-  autoLockOnFraud       Boolean  @default(true)
-  updatedAt             DateTime @updatedAt
-  updatedBy             String?
-
-  office  Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  updater User?  @relation("SettingsUpdater", fields: [updatedBy], references: [id])
-
-  @@map("security_settings")
-}
-
-// ─── Break Policy ─────────────────────────────────────────────────────────────
-
-model BreakPolicy {
-  id                   String      @id @default(uuid())
-  departmentId         String      @unique
-  policyName           String
-  maxLunchMinutes      Int         @default(60)
-  maxShortBreaks       Int         @default(2)
-  maxShortBreakMinutes Int         @default(15)
-  totalDailyBreakLimit Int         @default(90)
-  autoEndAfterMinutes  Int         @default(120)
-  overstayPenalty      Int         @default(50)
-  breakStart           String? // department break window start (HH:MM)
-  breakEnd             String? // department break window end (HH:MM)
-  requiresApproval     Boolean     @default(false)
-  appliesTo            ShiftType[]
-
-  department Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
-
-  @@map("break_policies")
-}
-
-// ─── Attendance Session & QR ──────────────────────────────────────────────────
-
-model AttendanceSession {
-  id                String        @id @default(uuid())
-  sessionName       String
-  // Snapshot of the office/org so a session keeps its identity even if the
-  // office or organization is later removed — sessions are NEVER deleted.
-  officeId          String?
-  officeName        String?
-  orgName           String?
-  createdBy         String?
-  startTime         DateTime
-  endTime           DateTime?
-  qrRefreshInterval Int           @default(30)
-  status            SessionStatus @default(SCHEDULED)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
-
-  // SetNull (not Cascade): deleting an office/org preserves its sessions.
-  office  Office? @relation(fields: [officeId], references: [id], onDelete: SetNull)
-  creator User?   @relation("SessionCreator", fields: [createdBy], references: [id], onDelete: SetNull)
-
-  qrTokens          QRToken[]
-  attendanceRecords AttendanceRecord[]
-  scanAttempts      ScanAttempt[]
-  fraudAlerts       FraudAlert[]
-  emergencyControls EmergencyControlSession[]
-
-  @@map("attendance_sessions")
-}
-
-model QRToken {
-  id          String    @id @default(uuid())
-  tokenValue  String    @unique
-  sessionId   String
-  generatedAt DateTime  @default(now())
-  expiresAt   DateTime
-  deviceScope String?
-  isConsumed  Boolean   @default(false)
-  consumedBy  String?
-  consumedAt  DateTime?
-
-  session AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  @@map("qr_tokens")
-}
-
-// ─── Attendance Record ────────────────────────────────────────────────────────
-
-model AttendanceRecord {
-  id                   String            @id @default(uuid())
-  employeeId           String
-  sessionId            String
-  date                 DateTime          @db.Date
-  clockInTime          DateTime?
-  clockOutTime         DateTime?
-  status               AttendanceStatus  @default(ABSENT)
-  totalWorkHours       Float?
-  totalBreakMinutes    Int               @default(0)
-  scanResult           ScanResult?
-  wifiVerified         Boolean           @default(false)
-  deviceVerified       Boolean           @default(false)
-  // ── Check-in context (device / wifi audit) ──
-  deviceId             String?
-  wifiSSID             String?
-  penalty              Int               @default(0)
-  checkInSource        AttendanceSource  @default(PHONE)
-  checkOutSource       AttendanceSource?
-  checkInRecordedById  String?
-  checkOutRecordedById String?
-  flagged              Boolean           @default(false)
-  flagReason           String?
-  reviewedBy           String?
-  reviewNotes          String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-
-  employee         User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  session          AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  reviewer         User?             @relation("RecordReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
-  checkInRecorder  User?             @relation("ManualCheckInRecorder", fields: [checkInRecordedById], references: [id], onDelete: SetNull)
-  checkOutRecorder User?             @relation("ManualCheckOutRecorder", fields: [checkOutRecordedById], references: [id], onDelete: SetNull)
-
-  breakRecords BreakRecord[]
-
-  @@unique([employeeId, sessionId, date])
-  @@map("attendance_records")
-}
-
-model ScanAttempt {
-  id         String     @id @default(uuid())
-  employeeId String
-  sessionId  String
-  tokenUsed  String
-  timestamp  DateTime   @default(now())
-  result     ScanResult
-  deviceId   String?
-  wifiSSID   String?
-  wifiBSSID  String?
-  ipAddress  String?
-  geoLat     Float?
-  geoLng     Float?
-
-  employee User              @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  session  AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-
-  fraudAlerts FraudAlert[]
-
-  @@map("scan_attempts")
-}
-
-// ─── Break Records ────────────────────────────────────────────────────────────
-
-model BreakRecord {
-  id                 String    @id @default(uuid())
-  attendanceRecordId String
-  employeeId         String
-  breakType          BreakType
-  startTime          DateTime
-  endTime            DateTime?
-  durationMinutes    Int?
-  isAutoEnded         Boolean   @default(false)
-  notes              String?
-  penalty            Int       @default(0)
-  startedByAdmin     Boolean   @default(false)
-
-  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
-  employee         User             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@map("break_records")
-}
-
-// ─── Leave ────────────────────────────────────────────────────────────────────
-
-model LeaveRequest {
-  id              String      @id @default(uuid())
-  employeeId      String
-  leaveType       LeaveType
-  startDate       DateTime    @db.Date
-  endDate         DateTime    @db.Date
-  totalDays       Float
-  reason          String?
-  attachmentUrls  String[]
-  status          LeaveStatus @default(PENDING)
-  approvedBy      String?
-  approvedAt      DateTime?
-  rejectionReason String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-
-  employee User  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  approver User? @relation("LeaveApprover", fields: [approvedBy], references: [id], onDelete: SetNull)
-
-  @@map("leave_requests")
-}
-
-model LeaveBalance {
-  id             String    @id @default(uuid())
-  employeeId     String
-  leaveType      LeaveType
-  year           Int
-  totalEntitled  Float     @default(0)
-  used           Float     @default(0)
-  pending        Float     @default(0)
-  remaining      Float     @default(0)
-  carriedForward Float     @default(0)
-
-  employee User @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-
-  @@unique([employeeId, leaveType, year])
-  @@map("leave_balances")
-}
-
-// ─── Fraud Detection ──────────────────────────────────────────────────────────
-
-model FraudAlert {
-  id            String        @id @default(uuid())
-  employeeId    String
-  sessionId     String
-  scanAttemptId String?
-  fraudType     FraudType
-  severity      AlertSeverity @default(MEDIUM)
-  description   String
-  evidence      Json?
-  status        AlertStatus   @default(NEW)
-  resolvedBy    String?
-  resolution    String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  employee    User              @relation("FraudAlertEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  session     AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  scanAttempt ScanAttempt?      @relation(fields: [scanAttemptId], references: [id])
-  resolver    User?             @relation("FraudAlertResolver", fields: [resolvedBy], references: [id], onDelete: SetNull)
-
-  @@map("fraud_alerts")
-}
-
-model ScreenshotLog {
-  id         String   @id @default(uuid())
-  employeeId String
-  deviceId   String?
-  platform   String
-  timestamp  DateTime @default(now())
-  sessionId  String?
-
-  @@map("screenshot_logs")
-}
-
-// ─── Emergency Control ────────────────────────────────────────────────────────
-
-model EmergencyControl {
-  id          String          @id @default(uuid())
-  triggeredBy String
-  action      EmergencyAction
-  reason      String
-  timestamp   DateTime        @default(now())
-  isReverted  Boolean         @default(false)
-  revertedAt  DateTime?
-  revertedBy  String?
-
-  admin    User                      @relation(fields: [triggeredBy], references: [id], onDelete: Cascade)
-  sessions EmergencyControlSession[]
-
-  @@map("emergency_controls")
-}
-
-model EmergencyControlSession {
-  id                 String @id @default(uuid())
-  emergencyControlId String
-  sessionId          String
-
-  emergencyControl EmergencyControl  @relation(fields: [emergencyControlId], references: [id], onDelete: Cascade)
-  session          AttendanceSession @relation(fields: [sessionId], references: [id])
-
-  @@map("emergency_control_sessions")
-}
-
-// ─── Reports ──────────────────────────────────────────────────────────────────
-
-model AttendanceReport {
-  id                  String   @id @default(uuid())
-  reportType          String
-  dateRangeStart      DateTime
-  dateRangeEnd        DateTime
-  totalPresent        Int      @default(0)
-  totalLate           Int      @default(0)
-  totalAbsent         Int      @default(0)
-  totalOnLeave        Int      @default(0)
-  totalFlagged        Int      @default(0)
-  averageWorkHours    Float?
-  averageBreakMinutes Int?
-  generatedAt         DateTime @default(now())
-  generatedBy         String
-  fileUrl             String?
-  metadata            Json?
-
-  generator User @relation(fields: [generatedBy], references: [id], onDelete: Cascade)
-
-  @@map("attendance_reports")
-}
-
-// ─── Notification Log ─────────────────────────────────────────────────────────
-
-model NotificationLog {
-  id       String   @id @default(uuid())
-  userId   String
-  channel  String
-  subject  String?
-  body     String
-  status   String   @default("sent")
-  sentAt   DateTime @default(now())
-  metadata Json?
-
-  @@map("notification_logs")
 }
