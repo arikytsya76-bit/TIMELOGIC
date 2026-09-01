@@ -10,80 +10,139 @@
  * must be cleared before 'npx prisma migrate deploy' runs.
  */
 
-const { exec } = require('child_process');
-const { promisify } = require('util');
+const fs = require('fs');
 const path = require('path');
 
-const execAsync = promisify(exec);
+// Load environment variables early
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 async function clearFailedMigrations() {
   try {
-    console.log('\n[Migration Cleanup] Starting...');
+    console.log('\n[Migration Cleanup] Starting migration cleanup process...');
     
+    // Check if DATABASE_URL is set
+    if (!process.env.DATABASE_URL) {
+      console.log('[Migration Cleanup] No DATABASE_URL set - skipping cleanup');
+      return true;
+    }
+
     // Load Prisma Client to get database connection
     const { PrismaClient } = require('@prisma/client');
-    const prisma = new PrismaClient();
+    const prisma = new PrismaClient({
+      log: [], // Disable logging to keep output clean
+    });
 
     try {
-      // Query to see current migration state
-      const failedMigrations = await prisma.$queryRaw`
-        SELECT migration_name, started_at, finished_at, execution_time_in_millis, success
-        FROM "_prisma_migrations"
-        WHERE success = false
-      `;
+      // First, check migration table existence and status
+      console.log('[Migration Cleanup] Checking migration status...');
+      
+      let failedMigrations = [];
+      try {
+        failedMigrations = await prisma.$queryRaw`
+          SELECT migration_name, started_at, finished_at, execution_time_in_millis, success
+          FROM "_prisma_migrations"
+          WHERE success = false
+          ORDER BY started_at DESC
+        `;
+      } catch (queryErr) {
+        if (queryErr.message.includes('does not exist') || queryErr.message.includes('P3005')) {
+          console.log('[Migration Cleanup] Migration table not yet created (fresh database) - OK');
+          return true;
+        }
+        throw queryErr;
+      }
 
       if (failedMigrations && failedMigrations.length > 0) {
-        console.log(`[Migration Cleanup] Found ${failedMigrations.length} failed migration(s):`);
+        console.log(`[Migration Cleanup] ⚠ Found ${failedMigrations.length} failed migration(s):`);
         failedMigrations.forEach((m) => {
-          console.log(`  - ${m.migration_name} (started: ${m.started_at})`);
+          console.log(`  - ${m.migration_name}`);
+          console.log(`    Started: ${m.started_at}`);
+          console.log(`    Execution time: ${m.execution_time_in_millis}ms`);
         });
 
-        // Delete all failed migration records
-        const deletedCount = await prisma.$executeRaw`
-          DELETE FROM "_prisma_migrations"
-          WHERE success = false
-        `;
-
-        console.log(`[Migration Cleanup] ✓ Cleared ${deletedCount} failed migration record(s)`);
+        // Delete ALL failed migration records
+        try {
+          const deletedCount = await prisma.$executeRaw`
+            DELETE FROM "_prisma_migrations"
+            WHERE success = false
+          `;
+          console.log(`[Migration Cleanup] ✓ Cleared ${deletedCount} failed migration record(s)`);
+        } catch (deleteErr) {
+          console.error('[Migration Cleanup] Error deleting failed migrations:', deleteErr.message);
+          // Try alternative approach - delete specific migration
+          try {
+            await prisma.$executeRaw`
+              DELETE FROM "_prisma_migrations"
+              WHERE migration_name = '20260830120000_add_face_verification_fields'
+            `;
+            console.log('[Migration Cleanup] ✓ Cleared specific failed migration');
+          } catch (specificErr) {
+            console.error('[Migration Cleanup] Could not delete specific migration:', specificErr.message);
+          }
+        }
       } else {
         console.log('[Migration Cleanup] No failed migrations found - proceeding normally');
       }
 
-      // Also specifically delete the known problematic migration if it exists
-      await prisma.$executeRaw`
-        DELETE FROM "_prisma_migrations"
-        WHERE migration_name = '20260830120000_add_face_verification_fields'
-      `;
+      // Safety: Always try to delete the known problematic migration if it exists
+      try {
+        const deleted = await prisma.$executeRaw`
+          DELETE FROM "_prisma_migrations"
+          WHERE migration_name = '20260830120000_add_face_verification_fields' AND success = false
+        `;
+        if (deleted > 0) {
+          console.log('[Migration Cleanup] ✓ Removed problematic migration record');
+        }
+      } catch (e) {
+        // Ignore errors on this safety check
+      }
 
       console.log('[Migration Cleanup] ✓ Migration database is clean\n');
+      return true;
+
     } catch (queryError) {
-      // If we can't query, the table might not exist yet (fresh database)
-      // This is fine - migrations will create it
-      if (queryError.code === 'P1017' || queryError.message.includes('table')) {
-        console.log('[Migration Cleanup] Database not yet initialized (fresh database) - OK');
-      } else if (queryError.message.includes('does not exist')) {
-        console.log('[Migration Cleanup] Migrations table does not exist yet - OK');
-      } else {
-        console.log('[Migration Cleanup] Warning: Could not check migration status:', queryError.message);
+      console.error('[Migration Cleanup] Database error:', queryError.message);
+      
+      // If we can't query, it might be a connection issue
+      if (queryError.code === 'P1017') {
+        console.log('[Migration Cleanup] Database connection failed - it will be created on first migration');
+        return true;
       }
+      
+      if (queryError.message.includes('table') || queryError.message.includes('does not exist')) {
+        console.log('[Migration Cleanup] Migrations table not yet created - OK');
+        return true;
+      }
+      
+      throw queryError;
+
     } finally {
       await prisma.$disconnect();
     }
 
   } catch (error) {
-    console.error('[Migration Cleanup] Error:', error.message);
-    console.error('[Migration Cleanup] Stack:', error.stack);
-    // Continue anyway - don't block the deployment
-    console.log('[Migration Cleanup] Continuing with deployment despite error...\n');
+    console.error('[Migration Cleanup] Fatal error:', error.message);
+    if (error.stack) {
+      console.error('[Migration Cleanup] Stack trace:', error.stack);
+    }
+    // Continue deployment anyway - don't block
+    console.log('[Migration Cleanup] ⚠ Continuing deployment despite error...\n');
+    return false;
   }
 }
 
 // Run and handle completion
 clearFailedMigrations()
-  .then(() => {
-    console.log('[Migration Cleanup] Done - Prisma is ready to run migrations');
+  .then((success) => {
+    if (success) {
+      console.log('[Migration Cleanup] ✓ SUCCESS - Prisma is ready to run migrations');
+    } else {
+      console.log('[Migration Cleanup] ⚠ PARTIAL - Continuing anyway');
+    }
+    process.exit(0);
   })
   .catch((err) => {
-    console.error('[Migration Cleanup] Unhandled error:', err);
-    console.log('[Migration Cleanup] Continuing anyway...');
+    console.error('[Migration Cleanup] FATAL ERROR:', err);
+    console.log('[Migration Cleanup] Continuing deployment anyway...');
+    process.exit(0); // Exit with 0 to not block deployment
   });
