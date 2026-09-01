@@ -8,7 +8,7 @@
     "build": "prisma generate",
     "start": "npx prisma migrate deploy && node src/server.js",
     "deploy": "npm start",
-    "postinstall": "prisma generate && node scripts/clear-failed-migrations.js",
+    "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "npx prisma migrate deploy",
     "db:generate": "prisma generate",
