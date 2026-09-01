@@ -222,54 +222,14 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
     fetchEmployeeSummary(initialEmp.id).then(setSummary).catch(() => setSummary({ totalPenalty: 0, attendanceCount: 0 }));
   }, [initialEmp]);
 
-  const buildFaceSignature = async (file: File): Promise<number[]> => {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result ?? ''));
-      reader.onerror = () => reject(new Error('Could not read the selected face photo.'));
-      reader.readAsDataURL(file);
-    });
-
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Could not process the selected face photo.'));
-      img.src = dataUrl;
-    });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 32;
-    canvas.height = 32;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('This browser cannot generate a face signature.');
-    context.drawImage(image, 0, 0, 32, 32);
-    const pixels = context.getImageData(0, 0, 32, 32).data;
-    const array: number[] = [];
-
-    for (let i = 0; i < pixels.length; i += 4) {
-      const r = pixels[i];
-      const g = pixels[i + 1];
-      const b = pixels[i + 2];
-      array.push(Number(((r * 0.299 + g * 0.587 + b * 0.114) / 255).toFixed(4)));
-    }
-
-    return array;
-  };
-
   const uploadFace = async (file: File) => {
     const token = getToken();
     if (!token) { alert('Session expired. Please log in again.'); return; }
 
     setUploading(true);
     try {
-      const faceSignature = await buildFaceSignature(file);
-      if (!faceSignature.length) {
-        throw new Error('This image could not be processed into a valid face signature. Please try another photo.');
-      }
-
       const fd = new FormData();
       fd.append('photo', file);  // field name must match upload.single('photo')
-      fd.append('faceSignature', JSON.stringify(faceSignature));
 
       const res = await authenticatedFetch(`${API_URL}/admin/users/${emp.id}/face`, {
         method: 'POST',
@@ -284,7 +244,7 @@ function EmployeeDetailModal({ emp: initialEmp, onClose, onRefresh }: { emp: any
         setImgVersion((v) => v + 1);  // force browser to re-fetch the new image
         setEmp((p: any) => ({ ...p, profileImageUrl: data.data.profileImageUrl }));
         onRefresh();
-        alert('✓ Face photo saved. Employee can now use face verification at check-in.');
+        alert('✓ Face photo saved. It is stored for display and can be uploaded normally.');
       } else {
         alert(`Upload failed: ${data.message ?? 'Unknown error'}`);
       }

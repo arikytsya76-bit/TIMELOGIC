@@ -591,118 +591,7 @@ class AttendanceService {
     };
   }
 
-  _normalizeFaceSignature(signature) {
-    if (!signature) return null;
-    if (Array.isArray(signature)) return signature.map((value) => Number(value));
-    if (typeof signature === 'string') {
-      try {
-        const parsed = JSON.parse(signature);
-        if (Array.isArray(parsed)) return parsed.map((value) => Number(value));
-      } catch (_) {
-        return null;
-      }
-    }
-    return null;
-  }
-
-  _cosineSimilarity(a, b) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length || a.length === 0) return 0;
-    let dot = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let index = 0; index < a.length; index += 1) {
-      const x = Number(a[index]);
-      const y = Number(b[index]);
-      dot += x * y;
-      normA += x * x;
-      normB += y * y;
-    }
-    if (!normA || !normB) return 0;
-    return dot / (Math.sqrt(normA) * Math.sqrt(normB));
-  }
-
-  async _verifyEmployeeFace(employee, faceSignature, sessionId, now) {
-    const normalized = this._normalizeFaceSignature(faceSignature);
-    if (!normalized) {
-      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
-    }
-
-    const hasStoredFaceEncoding = Boolean(employee.faceEncodingData);
-    const hasUploadedFacePhoto = Boolean(employee.profileImageUrl);
-
-    if (!hasStoredFaceEncoding) {
-      if (hasUploadedFacePhoto) {
-        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; profileImageUrl exists but faceEncodingData is missing.`);
-        return 1;
-      }
-      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
-    }
-
-    let stored;
-    try {
-      stored = Array.isArray(employee.faceEncodingData)
-        ? employee.faceEncodingData
-        : JSON.parse(Buffer.from(employee.faceEncodingData).toString('utf8'));
-    } catch (_) {
-      if (hasUploadedFacePhoto) {
-        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; saved encoding was invalid.`);
-        return 1;
-      }
-      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
-    }
-
-    if (!Array.isArray(stored)) {
-      if (hasUploadedFacePhoto) {
-        logger.warn(`Legacy face photo fallback used for employee ${employee.id}; saved encoding is not an array.`);
-        return 1;
-      }
-      throw Object.assign(new Error('No face photo is registered for this employee.'), { status: 400 });
-    }
-
-    if (employee.faceBlockedUntil && now < new Date(employee.faceBlockedUntil)) {
-      const minutesLeft = Math.max(1, Math.ceil((new Date(employee.faceBlockedUntil).getTime() - now.getTime()) / 60000));
-      throw Object.assign(new Error(`This is not the employee’s face. Try again in ${minutesLeft} minutes.`), { status: 403 });
-    }
-
-    const similarity = this._cosineSimilarity(normalized, stored);
-    if (similarity < 0.72) {
-      const blockedUntil = new Date(now.getTime() + 5 * 60 * 1000);
-      await prisma.user.update({
-        where: { id: employee.id },
-        data: {
-          faceLastMismatchAt: now,
-          faceMismatchCount: { increment: 1 },
-          faceBlockedUntil: blockedUntil,
-        },
-      });
-
-      await prisma.fraudAlert.create({
-        data: {
-          id: uuidv4(),
-          employeeId: employee.id,
-          sessionId,
-          fraudType: 'SELFIE_MISMATCH',
-          severity: 'HIGH',
-          description: 'This is not the employee’s face. Try again in 5 minutes.',
-          status: 'NEW',
-        },
-      });
-
-      throw Object.assign(new Error('This is not the employee’s face. Try again in 5 minutes.'), { status: 403 });
-    }
-
-    await prisma.user.update({
-      where: { id: employee.id },
-      data: {
-        faceBlockedUntil: null,
-        faceMismatchCount: 0,
-      },
-    });
-
-    return similarity;
-  }
-
-  async manualCheckIn(adminId, adminOrgId, { employeeId, sessionId, password, faceSignature }) {
+  async manualCheckIn(adminId, adminOrgId, { employeeId, sessionId, password }) {
     const clockInTime = await getCurrentServerTime();
     const employee = await this._loadEmployeeForChannel(employeeId, 'MANUAL', true);
     if (employee.orgId !== adminOrgId) {
@@ -713,7 +602,7 @@ class AttendanceService {
     }
     const session = await this._loadManualSession(sessionId, adminOrgId, clockInTime);
     if (!officeHoursFor(clockInTime, session.office)) throw Object.assign(new Error('This office is closed today.'), { status: 400 });
-    await this._verifyEmployeeFace({ ...employee, faceEncodingData: employee.faceEncodingData }, this._normalizeFaceSignature(faceSignature), sessionId, clockInTime);
+
     const { status, penalty } = this._computeStatusAndPenalty(clockInTime, session);
     const record = await this._persistCheckIn({
       employeeId, sessionId, date: attendanceDate(clockInTime, {
